@@ -206,7 +206,7 @@ export const KnowledgeBase: React.FC = () => {
               alignItems="center"
               justifyContent="center"
               w="full"
-              h={32}
+              minH={32}
               border="2px dashed"
               borderColor={dragging ? 'aws.orange' : files.length > 0 ? 'aws.orange' : 'gray.300'}
               borderRadius="lg"
@@ -214,6 +214,7 @@ export const KnowledgeBase: React.FC = () => {
               bg={dragging ? 'orange.100' : files.length > 0 ? 'orange.50' : 'gray.50'}
               _hover={{ borderColor: 'aws.orange', bg: 'orange.50' }}
               transition="all 0.15s"
+              p={4}
               onDragOver={(e) => { e.preventDefault(); if (!uploading) setDragging(true) }}
               onDragEnter={(e) => { e.preventDefault(); if (!uploading) setDragging(true) }}
               onDragLeave={() => setDragging(false)}
@@ -233,21 +234,58 @@ export const KnowledgeBase: React.FC = () => {
               }}
               onClick={() => !uploading && inputRef.current?.click()}
             >
-              <Icon as={MdDescription} boxSize={8} color="gray.400" mb={2} />
               {files.length > 0 ? (
-                <VStack spacing={1}>
-                  <Text fontSize="sm" fontWeight="medium" color="aws.orange">
-                    {files.length === 1 ? files[0].name : `${files.length} files selected`}
-                  </Text>
-                  {files.length > 1 && (
-                    <Text fontSize="xs" color="orange.400" textAlign="center">
-                      {files.slice(0, 3).map(f => f.name).join(', ')}
-                      {files.length > 3 ? ` +${files.length - 3} more` : ''}
-                    </Text>
-                  )}
-                </VStack>
+                <Box
+                  display="flex"
+                  flexWrap="wrap"
+                  gap={2}
+                  justifyContent="center"
+                  onClick={(e) => e.stopPropagation()}
+                >
+                  {files.map((f, i) => {
+                    const ext = f.name.split('.').pop()?.toLowerCase() ?? ''
+                    const isPdf = ext === 'pdf'
+                    const isMd = ext === 'md' || ext === 'markdown'
+                    const color = isPdf ? '#E53E3E' : isMd ? '#3182CE' : '#718096'
+                    const label = f.name.length > 14 ? f.name.slice(0, 11) + '…' : f.name
+                    return (
+                      <VStack
+                        key={i}
+                        spacing={1}
+                        align="center"
+                        w="60px"
+                        cursor="default"
+                        title={f.name}
+                      >
+                        <svg width="36" height="44" viewBox="0 0 36 44" fill="none" xmlns="http://www.w3.org/2000/svg">
+                          {/* Page body */}
+                          <rect x="1" y="1" width="34" height="42" rx="3" fill="white" stroke={color} strokeWidth="1.5"/>
+                          {/* Folded corner */}
+                          <path d="M24 1 L35 12 L24 12 Z" fill={color} opacity="0.2"/>
+                          <path d="M24 1 L35 12 H24 V1 Z" stroke={color} strokeWidth="1.5" strokeLinejoin="round" fill="white"/>
+                          {/* Content lines or type indicator */}
+                          {isPdf ? (
+                            <text x="18" y="32" textAnchor="middle" fill={color} fontSize="9" fontWeight="bold" fontFamily="monospace">PDF</text>
+                          ) : isMd ? (
+                            <text x="18" y="32" textAnchor="middle" fill={color} fontSize="11" fontWeight="bold" fontFamily="monospace">#</text>
+                          ) : (
+                            <>
+                              <line x1="8" y1="20" x2="28" y2="20" stroke={color} strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+                              <line x1="8" y1="25" x2="28" y2="25" stroke={color} strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+                              <line x1="8" y1="30" x2="20" y2="30" stroke={color} strokeWidth="1.5" strokeLinecap="round" opacity="0.5"/>
+                            </>
+                          )}
+                        </svg>
+                        <Text fontSize="9px" color="gray.600" textAlign="center" lineHeight="1.2" wordBreak="break-all">
+                          {label}
+                        </Text>
+                      </VStack>
+                    )
+                  })}
+                </Box>
               ) : (
                 <>
+                  <Icon as={MdDescription} boxSize={8} color="gray.400" mb={2} />
                   <Text fontSize="sm" color="gray.500">Drag & drop files or click to select</Text>
                   <Text fontSize="xs" color="gray.400" mt={1}>PDF, Markdown (.md), Plain text (.txt) — multiple allowed</Text>
                 </>
