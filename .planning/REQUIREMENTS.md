@@ -18,10 +18,10 @@
 - [ ] **GRAPH-04**: Graph schema fully initialized (uniqueness constraints + 1536-dim vector index) before seed runs
 
 ### CHAT — Multi-Turn Conversation
-- [ ] **CHAT-01**: User can send a message and receive an architecture plan response (end-to-end, non-stub)
-- [ ] **CHAT-02**: Conversation history is tracked per `conversation_id` — follow-up messages refine the previous plan
+- [x] **CHAT-01**: User can send a message and receive an architecture plan response (end-to-end, non-stub)
+- [x] **CHAT-02**: Conversation history is tracked per `conversation_id` — follow-up messages refine the previous plan
 - [x] **CHAT-03**: All LLM calls use async (`ainvoke`/`astream`) — no blocking sync `.invoke()` in async handlers
-- [ ] **CHAT-04**: Recommendation ID is a real UUID (not `"mock-uuid"`)
+- [x] **CHAT-04**: Recommendation ID is a real UUID (not `"mock-uuid"`)
 - [x] **CHAT-05**: LLM output parsed with structured output (Pydantic) — no brittle regex/string-split parsing
 - [x] **CHAT-06**: Plan response includes: architecture diagram (Mermaid), service breakdown text, IaC snippet preview, cost estimate
 
@@ -74,10 +74,10 @@
 | GRAPH-02 | Phase 2 — Graph Seeding | Pending |
 | GRAPH-03 | Phase 2 — Graph Seeding | Pending |
 | GRAPH-04 | Phase 2 — Graph Seeding | Pending |
-| CHAT-01 | Phase 3 — Multi-Turn Chat | Pending |
-| CHAT-02 | Phase 3 — Multi-Turn Chat | Pending |
+| CHAT-01 | Phase 3 — Multi-Turn Chat | Complete |
+| CHAT-02 | Phase 3 — Multi-Turn Chat | Complete |
 | CHAT-03 | Phase 3 — Multi-Turn Chat | Complete |
-| CHAT-04 | Phase 3 — Multi-Turn Chat | Pending |
+| CHAT-04 | Phase 3 — Multi-Turn Chat | Complete |
 | CHAT-05 | Phase 3 — Multi-Turn Chat | Complete |
 | CHAT-06 | Phase 3 — Multi-Turn Chat | Complete |
 | INGEST-01 | Phase 4 — Document Ingestion | Pending |

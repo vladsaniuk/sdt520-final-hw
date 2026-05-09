@@ -3,14 +3,14 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: executing
-stopped_at: Completed 03-01-PLAN.md
-last_updated: "2026-05-09T23:42:25.170Z"
+stopped_at: Completed 03-02-PLAN.md
+last_updated: "2026-05-09T23:47:10.965Z"
 last_activity: 2026-05-09
 progress:
   total_phases: 6
   completed_phases: 3
   total_plans: 12
-  completed_plans: 9
+  completed_plans: 10
   percent: 33
 ---
 
@@ -26,7 +26,7 @@ See: .planning/PROJECT.md (updated 2025-07-11)
 ## Current Position
 
 Phase: 03 (multi-turn-chat) — EXECUTING
-Plan: 2 of 4
+Plan: 3 of 4
 Status: Ready to execute
 Last activity: 2026-05-09
 
@@ -51,6 +51,7 @@ Progress: [███░░░░░░░] 33%
 
 **Recent Trend:** Phase 02 delivered: upload pipeline, WebSocket progress, real Neo4j docs list, deletion, drag-and-drop, multi-file, badges, toasts
 | Phase 03 P01 | 15 | 2 tasks | 3 files |
+| Phase 03 P02 | 2 | 2 tasks | 1 files |
 
 ## Accumulated Context
 
@@ -68,6 +69,8 @@ Pending decisions (must resolve before indicated phase):
 - **Before Phase 5**: Terraform approval UX — button vs chat message. Recommendation: "Approve & Download" button.
 - **Before Phase 3**: Conversation history size limit — unlimited vs sliding window of last N turns. Recommendation: last 10 turns.
 - [Phase 03]: Use json_mode with include_raw=True for OpenRouter-compatible structured output + retry
+- [Phase 03-02]: In-memory history Dict[str,List[BaseMessage]] at module level; persistence deferred to v2
+- [Phase 03-02]: StructuredOutputError returns HTTP 200 with error field (D-20) — frontend shows error bubble
 
 ### Pending Todos
 
@@ -81,6 +84,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-05-09T23:42:25.167Z
-Stopped at: Completed 03-01-PLAN.md
+Last session: 2026-05-09T23:47:10.962Z
+Stopped at: Completed 03-02-PLAN.md
 Next: /gsd-plan-phase 3
