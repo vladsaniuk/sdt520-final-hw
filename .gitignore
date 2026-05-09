@@ -40,3 +40,6 @@ Thumbs.db
 *.tfstate*
 *.tfvars
 .terraform.lock.hcl
+
+# Neo4j runtime data (Docker volume mount)
+data/
