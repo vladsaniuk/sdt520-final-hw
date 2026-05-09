@@ -4,6 +4,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from src.api.routes import router as chat_router
 from src.api.knowledge import router as knowledge_router
+from src.api.seed import router as seed_router
 from src.services.knowledge_base import KnowledgeBaseService
 
 
@@ -42,6 +43,7 @@ def health_check():
 # Include routers
 app.include_router(chat_router, prefix="/api/v1", tags=["chat"])
 app.include_router(knowledge_router, prefix="/api/v1/knowledge", tags=["knowledge"])
+app.include_router(seed_router, prefix="/api/v1", tags=["seed"])
 
 
 if __name__ == "__main__":

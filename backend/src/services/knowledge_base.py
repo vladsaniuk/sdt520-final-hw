@@ -15,24 +15,29 @@ class KnowledgeBaseService:
     def initialize_schema(self):
         """Initializes the Neo4j schema and vector indexes."""
         with self.driver.session() as session:
-            # Create constraints for uniqueness
-            session.run("CREATE CONSTRAINT IF NOT EXISTS FOR (s:AWS_Service) REQUIRE s.name IS UNIQUE")
-            session.run("CREATE CONSTRAINT IF NOT EXISTS FOR (p:WellArchitected_Pillar) REQUIRE p.name IS UNIQUE")
-            session.run("CREATE CONSTRAINT IF NOT EXISTS FOR (d:KnowledgeDocument) REQUIRE d.id IS UNIQUE")
-            
-            # Initialize Vector Index (Neo4j 5.x syntax)
-            # This assumes OpenAI embeddings (1536 dims) by default, 
-            # can be customized based on LLM choice.
+            # CRITICAL: Drop the wrong-dimension (1536-dim) index before recreating at 384-dim.
+            # "IF NOT EXISTS" without DROP silently keeps the old dimension — embeddings then fail.
+            session.run("DROP INDEX aws_document_chunks IF EXISTS")
+
+            # Recreate vector index at 384 dimensions for all-MiniLM-L6-v2
             session.run("""
                 CREATE VECTOR INDEX `aws_document_chunks` IF NOT EXISTS
                 FOR (c:Document_Chunk)
                 ON (c.embedding)
                 OPTIONS {indexConfig: {
-                 `vector.dimensions`: 1536,
-                 `vector.similarity_function`: 'cosine'
+                  `vector.dimensions`: 384,
+                  `vector.similarity_function`: 'cosine'
                 }}
             """)
-            print("[KnowledgeBase] Schema and Vector Index initialized.")
+
+            # Uniqueness constraints — safe to re-run (IF NOT EXISTS)
+            session.run("CREATE CONSTRAINT IF NOT EXISTS FOR (s:AWS_Service) REQUIRE s.name IS UNIQUE")
+            session.run("CREATE CONSTRAINT IF NOT EXISTS FOR (p:WellArchitected_Pillar) REQUIRE p.name IS UNIQUE")
+            session.run("CREATE CONSTRAINT IF NOT EXISTS FOR (d:KnowledgeDocument) REQUIRE d.id IS UNIQUE")
+            # NEW: Architecture_Pattern constraint (was missing — causes duplicate pattern nodes)
+            session.run("CREATE CONSTRAINT IF NOT EXISTS FOR (ap:Architecture_Pattern) REQUIRE ap.name IS UNIQUE")
+
+            print("[KnowledgeBase] Schema and Vector Index initialized (384-dim).")
 
     def add_service(self, name: str, category: str, description: str):
         with self.driver.session() as session:

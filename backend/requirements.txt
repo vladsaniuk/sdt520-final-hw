@@ -14,3 +14,6 @@ deepeval
 pytest
 ruff
 black
+sentence-transformers
+pypdf
+langchain-text-splitters
