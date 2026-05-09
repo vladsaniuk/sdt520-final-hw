@@ -6,16 +6,15 @@ export default defineConfig({
   plugins: [react()],
   server: {
     proxy: {
-      // HTTP API routes — proxied to backend container (Docker internal hostname)
-      '/api': {
-        target: 'http://backend:8000',
-        changeOrigin: true,
-      },
-      // WebSocket upgrade for ingestion progress — MUST be a separate entry with ws: true
-      // Without this, browser WebSocket connects to vite dev server (wrong host in Docker)
+      // WS rule MUST come before the generic /api rule — first match wins for upgrades
       '/api/v1/knowledge/progress': {
         target: 'ws://backend:8000',
         ws: true,
+        changeOrigin: true,
+      },
+      // HTTP API routes
+      '/api': {
+        target: 'http://backend:8000',
         changeOrigin: true,
       },
     },
