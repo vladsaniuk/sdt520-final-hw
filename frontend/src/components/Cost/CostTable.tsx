@@ -3,7 +3,7 @@ import React from 'react'
 interface BreakdownItem {
   service: string
   cost: number
-  is_calculated: bool
+  is_calculated: boolean
 }
 
 interface CostTableProps {

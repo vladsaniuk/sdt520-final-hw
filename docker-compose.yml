@@ -7,7 +7,12 @@ services:
       - "7687:7687"
     environment:
       - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-password}
-      - NEO4J_PLUGINS=["apoc", "gds"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     volumes:
       - ./data/neo4j:/data
       - ./data/neo4j/logs:/logs
@@ -25,7 +30,8 @@ services:
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
       - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
     depends_on:
-      - neo4j
+      neo4j:
+        condition: service_healthy
     volumes:
       - ./backend:/app
 
