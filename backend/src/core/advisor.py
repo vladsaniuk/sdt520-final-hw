@@ -1,6 +1,7 @@
 import os
+import json
 from langchain_openai import ChatOpenAI
-from langchain_community.graphs import Neo4jGraph
+from langchain_neo4j import Neo4jGraph
 from src.core.prompts import ADVISOR_PROMPT
 from src.services.knowledge_base import KnowledgeBaseService
 from typing import Dict, Any
@@ -48,5 +49,3 @@ class ArchitectureAdvisor:
         except Exception as e:
             print(f"[Advisor] Error during recommendation: {e}")
             return {"advice": "I encountered an error while generating your recommendation."}
-
-import json # Ensure json is available

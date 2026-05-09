@@ -1,3 +1,4 @@
+import uuid
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List
@@ -51,7 +52,7 @@ async def chat(request: ChatRequest):
     costs = cost_analyzer.estimate_costs(advice_text)
     
     return {
-        "recommendation_id": "mock-uuid",
+        "recommendation_id": str(uuid.uuid4()),
         "text": advice_text,
         "diagram": diagram,
         "iac": [

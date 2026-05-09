@@ -2,14 +2,12 @@ fastapi
 uvicorn
 langchain
 langchain-openai
-langchain-community
+langchain-neo4j
 neo4j
 neo4j-graphrag
 boto3
 pydantic
 pydantic-settings
-sqlalchemy
-psycopg2-binary
 python-multipart
 python-dotenv
 deepeval

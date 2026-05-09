@@ -1,4 +1,5 @@
 import os
+import json
 from langchain_openai import ChatOpenAI
 from src.services.pricing import PricingService
 from typing import Dict, Any, List
@@ -64,5 +65,3 @@ class CostAnalyzer:
         except Exception as e:
             print(f"[CostAnalyzer] Error: {e}")
             return {"total": 0.0, "breakdown": []}
-
-import json
