@@ -74,12 +74,31 @@ export const KnowledgeBase: React.FC = () => {
   useEffect(() => { fetchDocs() }, [fetchDocs])
 
   const handleDelete = async (id: string) => {
+    const doc = docs.find(d => d.id === id)
     setDeletingId(id)
     try {
-      await fetch(`/api/v1/knowledge/documents/${id}`, { method: 'DELETE' })
+      const res = await fetch(`/api/v1/knowledge/documents/${id}`, { method: 'DELETE' })
+      if (!res.ok) throw new Error()
       await fetchDocs()
+      toast({
+        title: 'Document removed',
+        description: doc?.filename,
+        status: 'success',
+        variant: 'subtle',
+        duration: 3000,
+        isClosable: true,
+        position: 'bottom-right',
+      })
     } catch {
-      // silently ignore
+      toast({
+        title: 'Failed to remove document',
+        description: doc?.filename,
+        status: 'error',
+        variant: 'subtle',
+        duration: 4000,
+        isClosable: true,
+        position: 'bottom-right',
+      })
     } finally {
       setDeletingId(null)
     }
@@ -130,7 +149,28 @@ export const KnowledgeBase: React.FC = () => {
           setProgress(msg)
           if (msg.status === 'indexed' || msg.status === 'error') {
             receivedTerminal = true
-            if (msg.status === 'indexed') fetchDocs()
+            if (msg.status === 'indexed') {
+              fetchDocs()
+              toast({
+                title: 'Document indexed',
+                description: file.name,
+                status: 'success',
+                variant: 'subtle',
+                duration: 3000,
+                isClosable: true,
+                position: 'bottom-right',
+              })
+            } else {
+              toast({
+                title: 'Indexing failed',
+                description: msg.message || file.name,
+                status: 'error',
+                variant: 'subtle',
+                duration: 5000,
+                isClosable: true,
+                position: 'bottom-right',
+              })
+            }
             ws.close()
             resolve()
           }
@@ -143,6 +183,15 @@ export const KnowledgeBase: React.FC = () => {
         }
       } catch (error) {
         setProgress({ status: 'error', progress_pct: 0, message: `Upload failed: ${String(error)}` })
+        toast({
+          title: 'Upload failed',
+          description: file.name,
+          status: 'error',
+          variant: 'subtle',
+          duration: 5000,
+          isClosable: true,
+          position: 'bottom-right',
+        })
         resolve()
       }
     })
