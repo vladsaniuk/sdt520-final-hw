@@ -70,8 +70,13 @@ Plans:
   2. Each plan response includes all four components: Mermaid architecture diagram, service breakdown, IaC snippet preview, and cost estimate
   3. LLM calls are non-blocking — multiple simultaneous requests do not stall the event loop or trigger Docker health restarts
   4. Conversation history persists across multiple turns within a session; the server assigns a `conversation_id` if none is provided
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 4 plans
+
+Plans:
+- [ ] 03-01-PLAN.md — Backend: Pydantic models (ArchitecturePlan) + async advisor with structured output + retry (Wave 1)
+- [ ] 03-02-PLAN.md — Backend: Routes — conversation history dict, updated chat handler, compact/clear endpoints (Wave 1)
+- [ ] 03-03-PLAN.md — Frontend: ChatBox — conversation wiring, localStorage, context fill bar, warning banner, diff badges, error bubble (Wave 2)
+- [ ] 03-04-PLAN.md — Frontend: App.tsx — real session list, sidebar Compact/Clear controls, ChatBox ref wiring (Wave 3)
 
 ### Phase 4: Terraform Download
 **Goal**: Users can approve a plan and download a valid, deployment-ready Terraform HCL configuration — the core deliverable of the project
