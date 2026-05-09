@@ -59,7 +59,8 @@ export const KnowledgeBase: React.FC = () => {
 
   const openProgressWebSocket = (docId: string) => {
     let receivedTerminal = false
-    const ws = new WebSocket(`/api/v1/knowledge/progress/${docId}`)
+    // Connect directly to backend — Vite WS proxy is unreliable in Docker
+    const ws = new WebSocket(`ws://localhost:8000/api/v1/knowledge/progress/${docId}`)
     ws.onmessage = (event) => {
       const data: ProgressState = JSON.parse(event.data)
       setProgress(data)
