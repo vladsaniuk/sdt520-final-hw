@@ -92,6 +92,38 @@ async def get_status(document_id: str):
     return {"document_id": document_id, **state}
 
 
+@router.get("/documents")
+async def list_documents():
+    """
+    List all indexed KnowledgeDocument nodes from Neo4j.
+    Returns filename, chunk count, and indexed_at timestamp for each document.
+    """
+    kb = KnowledgeBaseService()
+    try:
+        with kb.driver.session() as session:
+            result = session.run("""
+                MATCH (d:KnowledgeDocument)
+                OPTIONAL MATCH (c:Document_Chunk)-[:PART_OF]->(d)
+                RETURN d.id AS id,
+                       d.filename AS filename,
+                       d.indexed_at AS indexed_at,
+                       count(c) AS chunk_count
+                ORDER BY d.indexed_at DESC
+            """)
+            docs = [
+                {
+                    "id": row["id"],
+                    "filename": row["filename"],
+                    "chunk_count": row["chunk_count"],
+                    "indexed_at": row["indexed_at"],
+                }
+                for row in result
+            ]
+        return {"documents": docs}
+    finally:
+        kb.close()
+
+
 @router.delete("/documents/{document_id}")
 async def delete_document(document_id: str):
     """Delete a KnowledgeDocument and all its Document_Chunk nodes from Neo4j."""
