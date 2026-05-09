@@ -373,83 +373,175 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
         ) : (
           /* Message list */
           <VStack px={4} py={6} spacing={6} align="stretch">
-            {messages.map((msg, i) => (
-              <Flex key={i} gap={3} justify={msg.role === 'user' ? 'flex-end' : 'flex-start'}>
-                {msg.role === 'assistant' && (
-                  <Flex
-                    w={8} h={8} borderRadius="full" bg="aws.orange"
-                    align="center" justify="center" flexShrink={0} mt={1}
-                    boxShadow="sm"
-                  >
-                    <Icon as={MdBolt} color="aws.squid" boxSize={4} />
-                  </Flex>
-                )}
+            {messages.map((msg, i) => {
+              // Compute diff for assistant messages (D-22)
+              const prevAssistantServices = messages
+                .slice(0, i)
+                .filter(m => m.role === 'assistant' && m.services)
+                .pop()?.services
+              const diff = msg.role === 'assistant' && msg.services && prevAssistantServices !== undefined
+                ? computeDiff(prevAssistantServices, msg.services)
+                : { added: [], removed: [] }
+              const hasDiff = diff.added.length > 0 || diff.removed.length > 0
 
-                <Box maxW="3xl">
-                  <Box
-                    px={4} py={3}
-                    borderRadius={msg.role === 'user' ? '2xl' : '2xl'}
-                    borderTopRightRadius={msg.role === 'user' ? 'sm' : undefined}
-                    borderTopLeftRadius={msg.role === 'assistant' ? 'sm' : undefined}
-                    bg={msg.role === 'user' ? 'aws.squid' : 'white'}
-                    color={msg.role === 'user' ? 'white' : 'gray.800'}
-                    border={msg.role === 'assistant' ? '1px solid' : undefined}
-                    borderColor="gray.200"
-                    boxShadow="sm"
-                    ml={msg.role === 'user' ? 'auto' : undefined}
-                    fontSize="sm"
-                    lineHeight="relaxed"
-                  >
-                    <Text whiteSpace="pre-wrap">{msg.content}</Text>
+              // Error bubble (D-20)
+              if (msg.role === 'error') {
+                return (
+                  <Flex key={i} gap={3} justify="flex-start">
+                    <Flex
+                      w={8} h={8} borderRadius="full" bg="aws.orange"
+                      align="center" justify="center" flexShrink={0} mt={1}
+                      boxShadow="sm"
+                    >
+                      <Icon as={MdBolt} color="aws.squid" boxSize={4} />
+                    </Flex>
+                    <Box maxW="3xl">
+                      <Box
+                        bg="red.50"
+                        border="1px solid"
+                        borderColor="red.200"
+                        borderRadius="2xl"
+                        borderTopLeftRadius="sm"
+                        px={4}
+                        py={3}
+                        boxShadow="sm"
+                      >
+                        <HStack spacing={2} align="flex-start">
+                          <Icon as={MdWarning} color="red.500" boxSize={4} flexShrink={0} />
+                          <VStack spacing={0} align="flex-start">
+                            <Text fontSize="sm" fontWeight="semibold" color="red.700">
+                              Failed to generate plan
+                            </Text>
+                            <Text fontSize="sm" color="red.600" lineHeight="relaxed">
+                              The advisor couldn't process your request after retrying. Please rephrase and try again.
+                            </Text>
+                          </VStack>
+                        </HStack>
+                      </Box>
+                    </Box>
+                  </Flex>
+                )
+              }
+
+              return (
+                <Flex key={i} gap={3} justify={msg.role === 'user' ? 'flex-end' : 'flex-start'}>
+                  {msg.role === 'assistant' && (
+                    <Flex
+                      w={8} h={8} borderRadius="full" bg="aws.orange"
+                      align="center" justify="center" flexShrink={0} mt={1}
+                      boxShadow="sm"
+                    >
+                      <Icon as={MdBolt} color="aws.squid" boxSize={4} />
+                    </Flex>
+                  )}
+
+                  <Box maxW="3xl">
+                    <Box
+                      px={4} py={3}
+                      borderRadius={msg.role === 'user' ? '2xl' : '2xl'}
+                      borderTopRightRadius={msg.role === 'user' ? 'sm' : undefined}
+                      borderTopLeftRadius={msg.role === 'assistant' ? 'sm' : undefined}
+                      bg={msg.role === 'user' ? 'aws.squid' : 'white'}
+                      color={msg.role === 'user' ? 'white' : 'gray.800'}
+                      border={msg.role === 'assistant' ? '1px solid' : undefined}
+                      borderColor="gray.200"
+                      boxShadow="sm"
+                      ml={msg.role === 'user' ? 'auto' : undefined}
+                      fontSize="sm"
+                      lineHeight="relaxed"
+                    >
+                      <Text whiteSpace="pre-wrap">{msg.content}</Text>
+                    </Box>
+
+                    {/* Diff badge row (D-21, D-22) — shown on assistant bubbles after first */}
+                    {msg.role === 'assistant' && hasDiff && (
+                      <HStack
+                        spacing={1}
+                        mt={1}
+                        flexWrap="wrap"
+                        aria-label={`Changes from previous plan: ${diff.added.join(', ')} added, ${diff.removed.join(', ')} removed`}
+                      >
+                        {diff.added.map(name => (
+                          <Tag
+                            key={`add-${name}`}
+                            size="sm"
+                            borderRadius="md"
+                            bg="green.100"
+                            color="green.700"
+                            fontWeight="semibold"
+                            fontSize="11px"
+                            px={2}
+                            py={0}
+                          >
+                            +{name}
+                          </Tag>
+                        ))}
+                        {diff.removed.map(name => (
+                          <Tag
+                            key={`rem-${name}`}
+                            size="sm"
+                            borderRadius="md"
+                            bg="red.100"
+                            color="red.700"
+                            fontWeight="semibold"
+                            fontSize="11px"
+                            px={2}
+                            py={0}
+                          >
+                            {'\u2212'}{name}
+                          </Tag>
+                        ))}
+                      </HStack>
+                    )}
+
+                    {msg.role === 'assistant' && (
+                      <>
+                        {msg.diagram && <MermaidViewer definition={msg.diagram} />}
+                        {msg.costs && msg.costs.breakdown.length > 0 && (
+                          <CostTable total={msg.costs.total} breakdown={msg.costs.breakdown} />
+                        )}
+                        {msg.iac && msg.iac.length > 0 && (
+                          <Box mt={3} borderRadius="xl" overflow="hidden" border="1px solid" borderColor="gray.200" boxShadow="sm">
+                            <HStack px={4} py={2} bg="aws.squid" borderBottom="1px solid" borderColor="aws.squidLight" justify="space-between">
+                              <HStack spacing={2}>
+                                <Text fontSize="xs" fontWeight="bold" color="gray.300" textTransform="uppercase" letterSpacing="widest">
+                                  Terraform
+                                </Text>
+                              </HStack>
+                              <Button
+                                size="xs"
+                                bg="aws.orange"
+                                color="aws.squid"
+                                fontWeight="bold"
+                                _hover={{ bg: 'aws.orangeDark' }}
+                                onClick={showDownloadToast}
+                              >
+                                Download .tf
+                              </Button>
+                            </HStack>
+                            <Box p={4}>
+                              <VStack spacing={3} align="stretch">
+                                {msg.iac.map((snippet, j) => (
+                                  <CodeSnippet
+                                    key={j}
+                                    code={snippet.content}
+                                    language={snippet.type === 'terraform' ? 'hcl' : 'yaml'}
+                                  />
+                                ))}
+                              </VStack>
+                            </Box>
+                          </Box>
+                        )}
+                      </>
+                    )}
                   </Box>
 
-                  {msg.role === 'assistant' && (
-                    <>
-                      {msg.diagram && <MermaidViewer definition={msg.diagram} />}
-                      {msg.costs && msg.costs.breakdown.length > 0 && (
-                        <CostTable total={msg.costs.total} breakdown={msg.costs.breakdown} />
-                      )}
-                      {msg.iac && msg.iac.length > 0 && (
-                        <Box mt={3} borderRadius="xl" overflow="hidden" border="1px solid" borderColor="gray.200" boxShadow="sm">
-                          <HStack px={4} py={2} bg="aws.squid" borderBottom="1px solid" borderColor="aws.squidLight" justify="space-between">
-                            <HStack spacing={2}>
-                              <Text fontSize="xs" fontWeight="bold" color="gray.300" textTransform="uppercase" letterSpacing="widest">
-                                Terraform
-                              </Text>
-                            </HStack>
-                            <Button
-                              size="xs"
-                              bg="aws.orange"
-                              color="aws.squid"
-                              fontWeight="bold"
-                              _hover={{ bg: 'aws.orangeDark' }}
-                              onClick={showDownloadToast}
-                            >
-                              Download .tf
-                            </Button>
-                          </HStack>
-                          <Box p={4}>
-                            <VStack spacing={3} align="stretch">
-                              {msg.iac.map((snippet, j) => (
-                                <CodeSnippet
-                                  key={j}
-                                  code={snippet.content}
-                                  language={snippet.type === 'terraform' ? 'hcl' : 'yaml'}
-                                />
-                              ))}
-                            </VStack>
-                          </Box>
-                        </Box>
-                      )}
-                    </>
+                  {msg.role === 'user' && (
+                    <Avatar size="sm" name="U" bg="gray.300" color="gray.700" mt={1} flexShrink={0} />
                   )}
-                </Box>
-
-                {msg.role === 'user' && (
-                  <Avatar size="sm" name="U" bg="gray.300" color="gray.700" mt={1} flexShrink={0} />
-                )}
-              </Flex>
-            ))}
+                </Flex>
+              )
+            })}
 
             {loading && (
               <Flex gap={3} justify="flex-start">
@@ -468,6 +560,67 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
           </VStack>
         )}
       </Box>
+
+      {/* Warning banner — context fill >= 75% (UI-SPEC §2) */}
+      {fillPercent >= WARN_THRESHOLD && !warningDismissed && (
+        <Alert
+          status="warning"
+          bg="orange.50"
+          borderRadius="lg"
+          border="1px solid"
+          borderColor="orange.300"
+          mx={4}
+          mb={3}
+          alignItems="flex-start"
+        >
+          <AlertIcon color="orange.500" mt={1} />
+          <VStack align="flex-start" spacing={1} flex={1}>
+            <Text fontSize="sm" fontWeight="semibold" color="gray.800">
+              Context window is {fillPercent}% full
+            </Text>
+            <Text fontSize="13px" color="gray.600">
+              Older messages may be dropped on the next turn. Compact the conversation to preserve architecture decisions, or clear to start fresh.
+            </Text>
+            <HStack spacing={2} mt={1}>
+              <Button
+                size="xs"
+                bg="aws.orange"
+                color="aws.squid"
+                fontWeight="bold"
+                _hover={{ bg: 'aws.orangeDark' }}
+                isLoading={isCompacting}
+                loadingText="Compacting…"
+                onClick={handleCompact}
+              >
+                Compact
+              </Button>
+              {clearConfirming ? (
+                <HStack spacing={2}>
+                  <Text fontSize="xs" color="gray.500">Clear all messages?</Text>
+                  <Button size="xs" colorScheme="red" onClick={handleClear}>Yes, clear</Button>
+                  <Button size="xs" variant="ghost" color="gray.500" onClick={() => setClearConfirming(false)}>Cancel</Button>
+                </HStack>
+              ) : (
+                <Button
+                  size="xs"
+                  bg="red.100"
+                  color="red.700"
+                  fontWeight="semibold"
+                  _hover={{ bg: 'red.200' }}
+                  onClick={() => setClearConfirming(true)}
+                >
+                  Clear history
+                </Button>
+              )}
+            </HStack>
+          </VStack>
+          <CloseButton
+            alignSelf="flex-start"
+            aria-label="Dismiss context warning"
+            onClick={() => setWarningDismissed(true)}
+          />
+        </Alert>
+      )}
 
       {/* Error banner */}
       {error && (
@@ -521,6 +674,31 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
             flexShrink={0}
           />
         </HStack>
+        {/* Context fill bar (UI-SPEC §1) — visible when messages exist */}
+        {messages.length > 0 && (
+          <HStack maxW="3xl" mx="auto" spacing={2} mt={1} mb={1} w="full" align="center">
+            <Box flex={1} h="4px" bg="gray.200" borderRadius="full">
+              <Box
+                h="4px"
+                w={`${fillPercent}%`}
+                bg={fillPercent >= 90 ? 'red.500' : fillPercent >= 75 ? 'aws.orange' : 'green.400'}
+                borderRadius="full"
+                transition="width 0.3s ease"
+              />
+            </Box>
+            <Text
+              fontSize="11px"
+              fontWeight="medium"
+              color={fillPercent >= 90 ? 'red.500' : fillPercent >= 75 ? 'aws.orange' : 'gray.500'}
+              flexShrink={0}
+            >
+              {fillPercent}%
+            </Text>
+            <Text fontSize="11px" color="gray.400" flexShrink={0}>
+              Context
+            </Text>
+          </HStack>
+        )}
         <Text textAlign="center" fontSize="xs" color="gray.400" mt={2}>
           Shift+Enter for new line · Enter to send
         </Text>
