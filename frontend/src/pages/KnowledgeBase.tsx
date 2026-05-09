@@ -25,6 +25,7 @@ interface IndexedDoc {
   filename: string
   chunk_count: number
   indexed_at: string | null
+  file_on_disk: boolean
 }
 
 const STAGES = [
@@ -362,7 +363,7 @@ export const KnowledgeBase: React.FC = () => {
                       {doc.indexed_at ? ` · ${new Date(doc.indexed_at).toLocaleDateString()}` : ''}
                     </Text>
                   </Box>
-                  <Badge colorScheme="blue" flexShrink={0}>Uploaded</Badge>
+                  {doc.file_on_disk && <Badge colorScheme="blue" flexShrink={0}>Uploaded</Badge>}
                   <Badge colorScheme="green" flexShrink={0}>Indexed</Badge>
                   <Button
                     size="xs"

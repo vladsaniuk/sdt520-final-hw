@@ -116,6 +116,10 @@ async def list_documents():
                     "filename": row["filename"],
                     "chunk_count": row["chunk_count"],
                     "indexed_at": row["indexed_at"],
+                    "file_on_disk": any(
+                        f.startswith(f"{row['id']}_")
+                        for f in os.listdir(UPLOAD_DIR)
+                    ),
                 }
                 for row in result
             ]
