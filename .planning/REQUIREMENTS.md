@@ -20,10 +20,10 @@
 ### CHAT — Multi-Turn Conversation
 - [ ] **CHAT-01**: User can send a message and receive an architecture plan response (end-to-end, non-stub)
 - [ ] **CHAT-02**: Conversation history is tracked per `conversation_id` — follow-up messages refine the previous plan
-- [ ] **CHAT-03**: All LLM calls use async (`ainvoke`/`astream`) — no blocking sync `.invoke()` in async handlers
+- [x] **CHAT-03**: All LLM calls use async (`ainvoke`/`astream`) — no blocking sync `.invoke()` in async handlers
 - [ ] **CHAT-04**: Recommendation ID is a real UUID (not `"mock-uuid"`)
-- [ ] **CHAT-05**: LLM output parsed with structured output (Pydantic) — no brittle regex/string-split parsing
-- [ ] **CHAT-06**: Plan response includes: architecture diagram (Mermaid), service breakdown text, IaC snippet preview, cost estimate
+- [x] **CHAT-05**: LLM output parsed with structured output (Pydantic) — no brittle regex/string-split parsing
+- [x] **CHAT-06**: Plan response includes: architecture diagram (Mermaid), service breakdown text, IaC snippet preview, cost estimate
 
 ### INGEST — Document Ingestion Pipeline
 - [ ] **INGEST-01**: User can upload PDF, markdown, and plain text files via the UI
@@ -76,10 +76,10 @@
 | GRAPH-04 | Phase 2 — Graph Seeding | Pending |
 | CHAT-01 | Phase 3 — Multi-Turn Chat | Pending |
 | CHAT-02 | Phase 3 — Multi-Turn Chat | Pending |
-| CHAT-03 | Phase 3 — Multi-Turn Chat | Pending |
+| CHAT-03 | Phase 3 — Multi-Turn Chat | Complete |
 | CHAT-04 | Phase 3 — Multi-Turn Chat | Pending |
-| CHAT-05 | Phase 3 — Multi-Turn Chat | Pending |
-| CHAT-06 | Phase 3 — Multi-Turn Chat | Pending |
+| CHAT-05 | Phase 3 — Multi-Turn Chat | Complete |
+| CHAT-06 | Phase 3 — Multi-Turn Chat | Complete |
 | INGEST-01 | Phase 4 — Document Ingestion | Pending |
 | INGEST-02 | Phase 4 — Document Ingestion | Pending |
 | INGEST-03 | Phase 4 — Document Ingestion | Pending |

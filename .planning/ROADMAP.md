@@ -73,7 +73,7 @@ Plans:
 **Plans**: 4 plans
 
 Plans:
-- [ ] 03-01-PLAN.md — Backend: Pydantic models (ArchitecturePlan) + async advisor with structured output + retry (Wave 1)
+- [x] 03-01-PLAN.md — Backend: Pydantic models (ArchitecturePlan) + async advisor with structured output + retry (Wave 1)
 - [ ] 03-02-PLAN.md — Backend: Routes — conversation history dict, updated chat handler, compact/clear endpoints (Wave 1)
 - [ ] 03-03-PLAN.md — Frontend: ChatBox — conversation wiring, localStorage, context fill bar, warning banner, diff badges, error bubble (Wave 2)
 - [ ] 03-04-PLAN.md — Frontend: App.tsx — real session list, sidebar Compact/Clear controls, ChatBox ref wiring (Wave 3)
@@ -106,6 +106,6 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Baseline Fixes | 0/? | Not started | - |
 | 2. Graph Seeding & Document Ingestion | 0/? | Not started | - |
-| 3. Multi-Turn Chat | 0/? | Not started | - |
+| 3. Multi-Turn Chat | 1/4 | In Progress|  |
 | 4. Terraform Download | 0/? | Not started | - |
 | 5. Docker Polish | 0/? | Not started | - |
