@@ -11,6 +11,7 @@ import {
   Divider,
   Alert,
   AlertIcon,
+  useToast,
 } from '@chakra-ui/react'
 import { MdUploadFile, MdFolder, MdDescription, MdCheck, MdDelete } from 'react-icons/md'
 
@@ -55,7 +56,7 @@ export const KnowledgeBase: React.FC = () => {
   const [docs, setDocs] = useState<IndexedDoc[]>([])
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
-  const [dragging, setDragging] = useState(false)
+  const toast = useToast()
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
@@ -207,10 +208,20 @@ export const KnowledgeBase: React.FC = () => {
                 setDragging(false)
                 if (uploading) return
                 const allowed = ['.pdf', '.md', '.markdown', '.txt']
-                const dropped = Array.from(e.dataTransfer.files).filter(f =>
-                  allowed.some(ext => f.name.toLowerCase().endsWith(ext))
-                )
-                if (dropped.length > 0) { setFiles(dropped); setProgress(null) }
+                const all = Array.from(e.dataTransfer.files)
+                const valid = all.filter(f => allowed.some(ext => f.name.toLowerCase().endsWith(ext)))
+                const invalid = all.filter(f => !allowed.some(ext => f.name.toLowerCase().endsWith(ext)))
+                if (invalid.length > 0) {
+                  toast({
+                    title: `Unsupported file${invalid.length > 1 ? 's' : ''} ignored`,
+                    description: invalid.map(f => f.name).join(', '),
+                    status: 'warning',
+                    duration: 4000,
+                    isClosable: true,
+                    position: 'top-right',
+                  })
+                }
+                if (valid.length > 0) { setFiles(valid); setProgress(null) }
               }}
               onClick={() => !uploading && inputRef.current?.click()}
             >
