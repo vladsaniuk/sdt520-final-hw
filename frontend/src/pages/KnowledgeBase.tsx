@@ -217,6 +217,7 @@ export const KnowledgeBase: React.FC = () => {
                     title: `Unsupported file${invalid.length > 1 ? 's' : ''} dropped`,
                     description: `Only PDF, Markdown, and plain text files are supported. Ignored: ${invalid.map(f => f.name).join(', ')}`,
                     status: 'warning',
+                    variant: 'subtle',
                     duration: 5000,
                     isClosable: true,
                     position: 'bottom-right',
