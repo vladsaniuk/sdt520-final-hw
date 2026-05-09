@@ -17,3 +17,4 @@ black
 sentence-transformers
 pypdf
 langchain-text-splitters
+websockets>=12.0
