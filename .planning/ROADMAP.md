@@ -42,8 +42,12 @@ Plans:
   6. Uploaded documents are chunked, embedded, and stored as `Document_Chunk` nodes in Neo4j — retrievable via vector search
   7. Advisor recommendations visibly reference content from user-uploaded documents (GraphRAG is active, not hallucinated)
   8. Embeddings API decision is resolved and implemented — ingestion does not silently fall back or error on first run
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 3 plans
+
+Plans:
+- [ ] 02-01-PLAN.md — Schema fix (384-dim index + Architecture_Pattern constraint) + seed service + POST /api/v1/seed
+- [ ] 02-02-PLAN.md — Document ingestion pipeline (parse/chunk/embed/store) + WebSocket progress backend
+- [ ] 02-03-PLAN.md — Vite proxy + KnowledgeBase.tsx live progress bar + VectorCypherRetriever wired into advisor
 
 ### Phase 3: Multi-Turn Chat
 **Goal**: Users can hold iterative conversations where follow-up messages refine the architecture plan in context — this is the core UX value loop
