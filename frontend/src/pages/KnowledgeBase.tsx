@@ -57,6 +57,7 @@ export const KnowledgeBase: React.FC = () => {
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
   const toast = useToast()
+  const [dragging, setDragging] = useState(false)
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
