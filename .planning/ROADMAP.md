@@ -24,7 +24,11 @@ A six-phase brownfield completion. The scaffold (FastAPI + React + Neo4j + Docke
   2. Frontend compiles without TypeScript errors and Mermaid diagrams render correctly in the browser
   3. A chat message reaches the LLM and returns a real architecture response — `recommendation_id` is a UUID, not `"mock-uuid"`
   4. No SQLAlchemy models, psycopg2-binary, or dead PostgreSQL code remains in the codebase
-**Plans**: TBD
+**Plans**: 2 plans
+
+Plans:
+- [ ] 01-01-PLAN.md — Backend fixes: imports, lifespan, CORS, dead code, mock-uuid (BUG-02, BUG-03, BUG-06, BUG-07)
+- [ ] 01-02-PLAN.md — Infra + frontend: Neo4j healthcheck, CostTable type, Mermaid v10+ (BUG-01, BUG-04, BUG-05)
 
 ### Phase 2: Graph Seeding
 **Goal**: Neo4j is populated with AWS service knowledge and Well-Architected relationships so advisor recommendations are graph-grounded, not hallucinated
