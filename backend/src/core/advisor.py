@@ -16,7 +16,9 @@ class ArchitectureAdvisor:
         self.graph = Neo4jGraph(
             url=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
             username=os.getenv("NEO4J_USER", "neo4j"),
-            password=os.getenv("NEO4J_PASSWORD", "password")
+            password=os.getenv("NEO4J_PASSWORD", "password"),
+            enhanced_schema=False,
+            refresh_schema=False,
         )
 
     def get_recommendation(self, requirements: Dict[str, Any]) -> Dict[str, Any]:
