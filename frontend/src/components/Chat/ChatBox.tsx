@@ -171,10 +171,10 @@ export const ChatBox: React.FC = () => {
   return (
     <div className="flex flex-col h-full bg-gray-50">
       {/* Messages / Welcome */}
-      <div className={`flex-1 overflow-y-auto ${messages.length > 0 ? 'px-4 py-6 space-y-6' : ''}`}>
+      <div className={`flex-1 overflow-y-auto ${messages.length > 0 ? 'px-4 py-6 space-y-6' : 'flex'}`}>
         {messages.length === 0 ? (
           /* Welcome screen */
-          <div className="flex flex-col items-center justify-center h-full gap-6 px-4">
+          <div className="flex flex-col items-center justify-center flex-1 gap-6 px-4">
             {/* Logo area */}
             <div className="flex flex-col items-center gap-3">
               <div className="w-14 h-14 rounded-2xl bg-aws-orange flex items-center justify-center">
