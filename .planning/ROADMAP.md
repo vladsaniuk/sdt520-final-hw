@@ -8,7 +8,7 @@ A five-phase brownfield completion. The scaffold (FastAPI + React + Neo4j + Dock
 
 - [ ] **Phase 1: Baseline Fixes** - Repair broken foundation so the app starts, compiles, and makes a real LLM call
 - [x] **Phase 2: Graph Seeding & Document Ingestion** - Seed Neo4j with structural AWS knowledge, wire the full document ingestion pipeline, and add the upload UI — so GraphRAG has real data before chat is wired
-- [ ] **Phase 3: Multi-Turn Chat** - Wire conversation history and structured output for real iterative architecture refinement
+- [x] **Phase 3: Multi-Turn Chat** - Wire conversation history and structured output for real iterative architecture refinement (completed 2026-05-09)
 - [ ] **Phase 4: Terraform Download** - Deliver the core artifact: a downloadable, valid Terraform config from an approved plan
 - [ ] **Phase 5: Docker Polish** - End-to-end validation that `docker compose up` produces a working demo with zero manual steps
 
@@ -76,7 +76,7 @@ Plans:
 - [x] 03-01-PLAN.md — Backend: Pydantic models (ArchitecturePlan) + async advisor with structured output + retry (Wave 1)
 - [x] 03-02-PLAN.md — Backend: Routes — conversation history dict, updated chat handler, compact/clear endpoints (Wave 1)
 - [x] 03-03-PLAN.md — Frontend: ChatBox — conversation wiring, localStorage, context fill bar, warning banner, diff badges, error bubble (Wave 2)
-- [ ] 03-04-PLAN.md — Frontend: App.tsx — real session list, sidebar Compact/Clear controls, ChatBox ref wiring (Wave 3)
+- [x] 03-04-PLAN.md — Frontend: App.tsx — real session list, sidebar Compact/Clear controls, ChatBox ref wiring (Wave 3)
 
 ### Phase 4: Terraform Download
 **Goal**: Users can approve a plan and download a valid, deployment-ready Terraform HCL configuration — the core deliverable of the project
@@ -106,6 +106,6 @@ Plans:
 |-------|----------------|--------|-----------|
 | 1. Baseline Fixes | 0/? | Not started | - |
 | 2. Graph Seeding & Document Ingestion | 0/? | Not started | - |
-| 3. Multi-Turn Chat | 3/4 | In Progress|  |
+| 3. Multi-Turn Chat | 4/4 | Complete   | 2026-05-09 |
 | 4. Terraform Download | 0/? | Not started | - |
 | 5. Docker Polish | 0/? | Not started | - |
