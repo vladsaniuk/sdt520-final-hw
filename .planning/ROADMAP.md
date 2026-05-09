@@ -54,12 +54,12 @@ Plans:
 **Goal:** Make the existing UI look professional and polished — AWS-branded components (MermaidViewer, CodeSnippet, CostTable), welcome screen with prompt chips, Geist font, and inline error handling
 **Requirements**: UI-01, BUG-04 (already fixed), BUG-05 (already fixed)
 **Depends on:** Phase 2
-**Plans:** 3 plans
+**Plans:** 3/3 plans complete
 
 Plans:
-- [ ] 02.1-01-PLAN.md — Font integration: install @fontsource/geist + @fontsource/geist-mono, wire globally in main.tsx + index.css + mermaid.css (Wave 1)
-- [ ] 02.1-02-PLAN.md — MermaidViewer restyle (dark header) + CodeSnippet restyle (copy state, Geist Mono) (Wave 2, parallel)
-- [ ] 02.1-03-PLAN.md — CostTable restyle (striped rows, dark header) + ChatBox overhaul (welcome screen, error banner, panel cleanup) (Wave 2, parallel)
+- [x] 02.1-01-PLAN.md — Font integration: install @fontsource/geist + @fontsource/geist-mono, wire globally in main.tsx + index.css + mermaid.css (Wave 1)
+- [x] 02.1-02-PLAN.md — MermaidViewer restyle (dark header) + CodeSnippet restyle (copy state, Geist Mono) (Wave 2, parallel)
+- [x] 02.1-03-PLAN.md — CostTable restyle (striped rows, dark header) + ChatBox overhaul (welcome screen, error banner, panel cleanup) (Wave 2, parallel)
 
 ### Phase 3: Multi-Turn Chat
 **Goal**: Users can hold iterative conversations where follow-up messages refine the architecture plan in context — this is the core UX value loop
