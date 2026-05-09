@@ -59,6 +59,10 @@ export const KnowledgeBase: React.FC = () => {
   const toast = useToast()
   const [dragging, setDragging] = useState(false)
 
+  const notify = (status: 'success' | 'error' | 'warning', title: string, description?: string) =>
+    toast({ title, description, status, variant: 'subtle', duration: status === 'error' ? 5000 : 3000,
+      isClosable: true, position: 'bottom-right', containerStyle: { minW: '320px', maxW: '320px' } })
+
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
   const fetchDocs = useCallback(async () => {
@@ -80,25 +84,9 @@ export const KnowledgeBase: React.FC = () => {
       const res = await fetch(`/api/v1/knowledge/documents/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
       await fetchDocs()
-      toast({
-        title: 'Document removed',
-        description: doc?.filename,
-        status: 'success',
-        variant: 'subtle',
-        duration: 3000,
-        isClosable: true,
-        position: 'bottom-right',
-      })
+      notify('success', 'Document removed', doc?.filename)
     } catch {
-      toast({
-        title: 'Failed to remove document',
-        description: doc?.filename,
-        status: 'error',
-        variant: 'subtle',
-        duration: 4000,
-        isClosable: true,
-        position: 'bottom-right',
-      })
+      notify('error', 'Failed to remove document', doc?.filename)
     } finally {
       setDeletingId(null)
     }
@@ -151,25 +139,9 @@ export const KnowledgeBase: React.FC = () => {
             receivedTerminal = true
             if (msg.status === 'indexed') {
               fetchDocs()
-              toast({
-                title: 'Document indexed',
-                description: file.name,
-                status: 'success',
-                variant: 'subtle',
-                duration: 3000,
-                isClosable: true,
-                position: 'bottom-right',
-              })
+              notify('success', 'Document indexed', file.name)
             } else {
-              toast({
-                title: 'Indexing failed',
-                description: msg.message || file.name,
-                status: 'error',
-                variant: 'subtle',
-                duration: 5000,
-                isClosable: true,
-                position: 'bottom-right',
-              })
+              notify('error', 'Indexing failed', msg.message || file.name)
             }
             ws.close()
             resolve()
@@ -183,15 +155,7 @@ export const KnowledgeBase: React.FC = () => {
         }
       } catch (error) {
         setProgress({ status: 'error', progress_pct: 0, message: `Upload failed: ${String(error)}` })
-        toast({
-          title: 'Upload failed',
-          description: file.name,
-          status: 'error',
-          variant: 'subtle',
-          duration: 5000,
-          isClosable: true,
-          position: 'bottom-right',
-        })
+        notify('error', 'Upload failed', file.name)
         resolve()
       }
     })
@@ -262,15 +226,8 @@ export const KnowledgeBase: React.FC = () => {
                 const valid = all.filter(f => allowed.some(ext => f.name.toLowerCase().endsWith(ext)))
                 const invalid = all.filter(f => !allowed.some(ext => f.name.toLowerCase().endsWith(ext)))
                 if (invalid.length > 0) {
-                  toast({
-                    title: `Unsupported file${invalid.length > 1 ? 's' : ''} dropped`,
-                    description: `Only PDF, Markdown, and plain text files are supported. Ignored: ${invalid.map(f => f.name).join(', ')}`,
-                    status: 'warning',
-                    variant: 'subtle',
-                    duration: 5000,
-                    isClosable: true,
-                    position: 'bottom-right',
-                  })
+                  notify('warning', `Unsupported file${invalid.length > 1 ? 's' : ''} dropped`,
+                    `Only PDF, Markdown, and plain text files are supported. Ignored: ${invalid.map(f => f.name).join(', ')}`)
                 }
                 if (valid.length > 0) { setFiles(valid); setProgress(null) }
               }}
