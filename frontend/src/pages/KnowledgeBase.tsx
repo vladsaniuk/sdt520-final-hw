@@ -206,7 +206,10 @@ export const KnowledgeBase: React.FC = () => {
                 e.preventDefault()
                 setDragging(false)
                 if (uploading) return
-                const dropped = Array.from(e.dataTransfer.files)
+                const allowed = ['.pdf', '.md', '.markdown', '.txt']
+                const dropped = Array.from(e.dataTransfer.files).filter(f =>
+                  allowed.some(ext => f.name.toLowerCase().endsWith(ext))
+                )
                 if (dropped.length > 0) { setFiles(dropped); setProgress(null) }
               }}
               onClick={() => !uploading && inputRef.current?.click()}
