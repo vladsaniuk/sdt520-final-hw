@@ -73,19 +73,13 @@ async def ingest_document(doc_id: str, file_path: str, filename: str) -> None:
     """
     kb = KnowledgeBaseService()
     try:
-        # Brief pause so the WebSocket client has time to connect before we start emitting states.
-        # Parsing and chunking are sub-millisecond — without this pause they finish before the
-        # WS handshake completes, and the client only ever sees the first embedded-chunk update.
-        await asyncio.sleep(0.4)
-
         await update_progress(doc_id, "parsing", 5, "Reading document...")
         text = await asyncio.to_thread(_extract_text, file_path, filename)
 
-        await update_progress(doc_id, "chunking", 15, "Splitting into chunks...")
+        await update_progress(doc_id, "chunking", 20, "Splitting into chunks...")
         chunks = await asyncio.to_thread(splitter.split_text, text)
         total = len(chunks)
 
-        await update_progress(doc_id, "chunking", 25, f"Split into {total} chunks")
         await update_progress(doc_id, "embedding", 30, f"Embedding {total} chunks...")
 
         def _embed_and_store_chunk(chunk_text: str, chunk_index: int) -> None:

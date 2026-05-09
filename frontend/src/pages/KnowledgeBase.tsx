@@ -12,7 +12,7 @@ import {
   Alert,
   AlertIcon,
 } from '@chakra-ui/react'
-import { MdUploadFile, MdFolder, MdDescription } from 'react-icons/md'
+import { MdUploadFile, MdFolder, MdDescription, MdCheck } from 'react-icons/md'
 
 interface ProgressState {
   status: string
@@ -24,6 +24,25 @@ const MOCK_INDEXED_DOCS = [
   { name: 'AWS-Well-Architected-Framework.pdf', size: '2.4 MB', chunks: 312, date: '2 days ago' },
   { name: 'aws-security-whitepaper.pdf', size: '1.1 MB', chunks: 148, date: '1 week ago' },
 ]
+
+const STAGES = [
+  { key: 'upload',    label: 'Upload' },
+  { key: 'parsing',   label: 'Parse' },
+  { key: 'chunking',  label: 'Chunk' },
+  { key: 'embedding', label: 'Embed' },
+  { key: 'indexed',   label: 'Done' },
+]
+
+function getStageIndex(status: string): number {
+  const map: Record<string, number> = {
+    pending: 0, upload: 0,
+    parsing: 1,
+    chunking: 2,
+    embedding: 3,
+    indexed: 4, error: 4,
+  }
+  return map[status] ?? 0
+}
 
 export const KnowledgeBase: React.FC = () => {
   const [file, setFile] = useState<File | null>(null)
@@ -46,7 +65,6 @@ export const KnowledgeBase: React.FC = () => {
       try {
         const res = await fetch(`/api/v1/knowledge/status/${docId}`)
         const data = await res.json()
-        // 'unknown' = doc no longer in memory (already indexed/expired), stop polling
         if (data.status !== 'unknown') {
           setProgress({ status: data.status, progress_pct: data.progress_pct ?? 0, message: data.message ?? '' })
         }
@@ -59,7 +77,6 @@ export const KnowledgeBase: React.FC = () => {
 
   const openProgressWebSocket = (docId: string) => {
     let receivedTerminal = false
-    // Connect directly to backend — Vite WS proxy is unreliable in Docker
     const ws = new WebSocket(`ws://localhost:8000/api/v1/knowledge/progress/${docId}`)
     ws.onmessage = (event) => {
       const data: ProgressState = JSON.parse(event.data)
@@ -71,7 +88,6 @@ export const KnowledgeBase: React.FC = () => {
     }
     ws.onerror = () => {
       ws.close()
-      // Only fall back to polling if we haven't already received a terminal status via WS
       if (!receivedTerminal) startPolling(docId)
     }
   }
@@ -79,7 +95,7 @@ export const KnowledgeBase: React.FC = () => {
   const handleUpload = async () => {
     if (!file) return
     setUploading(true)
-    setProgress({ status: 'pending', progress_pct: 0, message: 'Uploading…' })
+    setProgress(null)
     const formData = new FormData()
     formData.append('file', file)
     try {
@@ -88,6 +104,8 @@ export const KnowledgeBase: React.FC = () => {
       const data = await response.json()
       setFile(null)
       if (inputRef.current) inputRef.current.value = ''
+      // Show pipeline immediately after POST returns; WS will push stage updates
+      setProgress({ status: 'parsing', progress_pct: 5, message: 'Reading document...' })
       openProgressWebSocket(data.document_id)
     } catch (error) {
       setProgress({ status: 'error', progress_pct: 0, message: `Upload failed: ${String(error)}` })
@@ -96,8 +114,8 @@ export const KnowledgeBase: React.FC = () => {
     }
   }
 
-  const progressColorScheme =
-    progress?.status === 'indexed' ? 'green' : progress?.status === 'error' ? 'red' : 'orange'
+  const activeStage = progress ? getStageIndex(progress.status) : -1
+  const isError = progress?.status === 'error'
 
   return (
     <Box h="full" overflowY="auto" bg="gray.50" px={6} py={8}>
@@ -168,25 +186,97 @@ export const KnowledgeBase: React.FC = () => {
               Upload &amp; Index
             </Button>
 
+            {/* Pipeline stages — shown after POST returns (button spinner covers upload stage) */}
             {progress && (
-              <VStack mt={4} spacing={1} align="stretch">
-                <HStack justify="space-between" fontSize="xs" color="gray.500">
-                  <Text textTransform="capitalize">{progress.status}</Text>
-                  <Text>{progress.progress_pct}%</Text>
+              <VStack mt={5} spacing={3} align="stretch">
+                {/* Stage indicators */}
+                <HStack spacing={0} align="center">
+                  {STAGES.map((stage, i) => {
+                    const done = !isError && i < activeStage
+                    const active = i === activeStage
+                    const errored = isError && i === activeStage
+                    const color = errored
+                      ? 'red.400'
+                      : done
+                      ? 'green.400'
+                      : active
+                      ? 'aws.orange'
+                      : 'gray.300'
+
+                    return (
+                      <React.Fragment key={stage.key}>
+                        <VStack spacing={1} flex={1} align="center">
+                          <Box
+                            w={7} h={7}
+                            borderRadius="full"
+                            bg={done || active ? color : 'gray.100'}
+                            border="2px solid"
+                            borderColor={color}
+                            display="flex"
+                            alignItems="center"
+                            justifyContent="center"
+                            transition="all 0.2s"
+                          >
+                            {done ? (
+                              <Icon as={MdCheck} color="white" boxSize={4} />
+                            ) : (
+                              <Box
+                                w={2} h={2}
+                                borderRadius="full"
+                                bg={active ? 'white' : 'gray.300'}
+                              />
+                            )}
+                          </Box>
+                          <Text
+                            fontSize="10px"
+                            fontWeight={active ? 'semibold' : 'normal'}
+                            color={errored ? 'red.400' : active ? 'aws.orange' : done ? 'green.500' : 'gray.400'}
+                          >
+                            {stage.label}
+                          </Text>
+                        </VStack>
+                        {/* Connector line between circles */}
+                        {i < STAGES.length - 1 && (
+                          <Box
+                            flex={1}
+                            h="2px"
+                            bg={i < activeStage ? 'green.300' : 'gray.200'}
+                            mb="14px"
+                            transition="background 0.2s"
+                          />
+                        )}
+                      </React.Fragment>
+                    )
+                  })}
                 </HStack>
-                <Progress
-                  value={progress.progress_pct}
-                  colorScheme={progressColorScheme}
-                  borderRadius="full"
-                  size="sm"
-                  hasStripe={['parsing', 'chunking', 'embedding'].includes(progress.status)}
-                  isAnimated={['parsing', 'chunking', 'embedding'].includes(progress.status)}
-                />
-                <Text fontSize="xs" color="gray.500">{progress.message}</Text>
+
+                {/* Progress bar — only during embedding (the slow part) */}
+                {progress.status === 'embedding' && (
+                  <Box>
+                    <HStack justify="space-between" fontSize="xs" color="gray.500" mb={1}>
+                      <Text>{progress.message}</Text>
+                      <Text>{progress.progress_pct}%</Text>
+                    </HStack>
+                    <Progress
+                      value={progress.progress_pct}
+                      colorScheme="orange"
+                      borderRadius="full"
+                      size="sm"
+                      hasStripe
+                      isAnimated
+                    />
+                  </Box>
+                )}
+
+                {/* Status message for fast intermediate stages */}
+                {!['embedding', 'indexed', 'error'].includes(progress.status) && (
+                  <Text fontSize="xs" color="gray.500" textAlign="center">{progress.message}</Text>
+                )}
+
                 {progress.status === 'indexed' && (
                   <Alert status="success" borderRadius="md" py={2}>
                     <AlertIcon />
-                    <Text fontSize="sm">Document indexed successfully</Text>
+                    <Text fontSize="sm">{progress.message}</Text>
                   </Alert>
                 )}
                 {progress.status === 'error' && (
