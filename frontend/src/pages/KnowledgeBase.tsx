@@ -250,7 +250,18 @@ export const KnowledgeBase: React.FC = () => {
                   })}
                 </HStack>
 
-                {/* Progress bar — only during embedding (the slow part) */}
+                {/* Progress bar — indeterminate for parse/chunk, percentage for embed */}
+                {['parsing', 'chunking'].includes(progress.status) && (
+                  <Box>
+                    <Text fontSize="xs" color="gray.500" mb={1}>{progress.message}</Text>
+                    <Progress
+                      isIndeterminate
+                      colorScheme="orange"
+                      borderRadius="full"
+                      size="sm"
+                    />
+                  </Box>
+                )}
                 {progress.status === 'embedding' && (
                   <Box>
                     <HStack justify="space-between" fontSize="xs" color="gray.500" mb={1}>
@@ -269,7 +280,7 @@ export const KnowledgeBase: React.FC = () => {
                 )}
 
                 {/* Status message for fast intermediate stages */}
-                {!['embedding', 'indexed', 'error'].includes(progress.status) && (
+                {!['parsing', 'chunking', 'embedding', 'indexed', 'error'].includes(progress.status) && (
                   <Text fontSize="xs" color="gray.500" textAlign="center">{progress.message}</Text>
                 )}
 
