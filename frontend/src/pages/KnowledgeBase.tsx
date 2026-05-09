@@ -32,16 +32,25 @@ export const KnowledgeBase: React.FC = () => {
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  const TERMINAL_STATUSES = new Set(['indexed', 'error', 'unknown'])
+
+  const stopPolling = () => {
+    if (pollingRef.current) {
+      clearInterval(pollingRef.current)
+      pollingRef.current = null
+    }
+  }
+
   const startPolling = (docId: string) => {
     pollingRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/v1/knowledge/status/${docId}`)
         const data = await res.json()
-        setProgress({ status: data.status, progress_pct: data.progress_pct ?? 0, message: data.message ?? '' })
-        if (data.status === 'indexed' || data.status === 'error') {
-          clearInterval(pollingRef.current!)
-          pollingRef.current = null
+        // 'unknown' = doc no longer in memory (already indexed/expired), stop polling
+        if (data.status !== 'unknown') {
+          setProgress({ status: data.status, progress_pct: data.progress_pct ?? 0, message: data.message ?? '' })
         }
+        if (TERMINAL_STATUSES.has(data.status)) stopPolling()
       } catch {
         // Ignore polling errors silently
       }
@@ -49,15 +58,20 @@ export const KnowledgeBase: React.FC = () => {
   }
 
   const openProgressWebSocket = (docId: string) => {
+    let receivedTerminal = false
     const ws = new WebSocket(`/api/v1/knowledge/progress/${docId}`)
     ws.onmessage = (event) => {
       const data: ProgressState = JSON.parse(event.data)
       setProgress(data)
-      if (data.status === 'indexed' || data.status === 'error') ws.close()
+      if (data.status === 'indexed' || data.status === 'error') {
+        receivedTerminal = true
+        ws.close()
+      }
     }
     ws.onerror = () => {
       ws.close()
-      startPolling(docId)
+      // Only fall back to polling if we haven't already received a terminal status via WS
+      if (!receivedTerminal) startPolling(docId)
     }
   }
 
