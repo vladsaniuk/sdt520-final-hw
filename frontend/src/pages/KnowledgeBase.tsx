@@ -235,12 +235,15 @@ export const KnowledgeBase: React.FC = () => {
             >
               <Icon as={MdDescription} boxSize={8} color="gray.400" mb={2} />
               {files.length > 0 ? (
-                <VStack spacing={0}>
+                <VStack spacing={1}>
                   <Text fontSize="sm" fontWeight="medium" color="aws.orange">
                     {files.length === 1 ? files[0].name : `${files.length} files selected`}
                   </Text>
                   {files.length > 1 && (
-                    <Text fontSize="xs" color="orange.400">{files.map(f => f.name).join(', ')}</Text>
+                    <Text fontSize="xs" color="orange.400" textAlign="center">
+                      {files.slice(0, 3).map(f => f.name).join(', ')}
+                      {files.length > 3 ? ` +${files.length - 3} more` : ''}
+                    </Text>
                   )}
                 </VStack>
               ) : (
@@ -260,20 +263,30 @@ export const KnowledgeBase: React.FC = () => {
               />
             </Box>
 
-            <Button
-              mt={4}
-              w="full"
-              bg="aws.orange"
-              color="aws.squid"
-              fontWeight="bold"
-              _hover={{ bg: 'aws.orangeDark' }}
-              isDisabled={files.length === 0 || uploading}
-              isLoading={uploading && !progress}
-              loadingText="Uploading…"
-              onClick={handleUpload}
-            >
-              Upload &amp; Index{files.length > 1 ? ` (${files.length} files)` : ''}
-            </Button>
+            <HStack mt={4} spacing={3}>
+              <Button
+                flex={1}
+                bg="aws.orange"
+                color="aws.squid"
+                fontWeight="bold"
+                _hover={{ bg: 'aws.orangeDark' }}
+                isDisabled={files.length === 0 || uploading}
+                isLoading={uploading && !progress}
+                loadingText="Uploading…"
+                onClick={handleUpload}
+              >
+                Upload &amp; Index{files.length > 1 ? ` (${files.length} files)` : ''}
+              </Button>
+              {(files.length > 0 || progress) && !uploading && (
+                <Button
+                  variant="outline"
+                  colorScheme="gray"
+                  onClick={() => { setFiles([]); setProgress(null); setQueueIndex(null); if (inputRef.current) inputRef.current.value = '' }}
+                >
+                  Clear
+                </Button>
+              )}
+            </HStack>
 
             {/* Pipeline stages — shown after POST returns (button spinner covers upload stage) */}
             {(progress || queueIndex) && (
