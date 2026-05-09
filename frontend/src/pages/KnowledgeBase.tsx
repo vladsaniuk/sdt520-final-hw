@@ -219,7 +219,7 @@ export const KnowledgeBase: React.FC = () => {
                     status: 'warning',
                     duration: 5000,
                     isClosable: true,
-                    position: 'bottom',
+                    position: 'bottom-right',
                   })
                 }
                 if (valid.length > 0) { setFiles(valid); setProgress(null) }
