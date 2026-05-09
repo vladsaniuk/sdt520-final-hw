@@ -1,0 +1,14 @@
+node_modules/
+.git/
+Dockerfile*
+docker-compose*
+.dockerignore
+*.log*
+.env*
+coverage/
+backend/__pycache__/
+backend/.venv/
+backend/venv/
+frontend/dist/
+frontend/build/
+.code-review-graph/

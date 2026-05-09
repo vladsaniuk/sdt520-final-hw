@@ -1,0 +1,18 @@
+.mermaid {
+  font-family: 'Inter', sans-serif;
+}
+
+.mermaid svg {
+  max-width: 100%;
+  height: auto;
+}
+
+.mermaid .node rect {
+  fill: #f9fafb !important;
+  stroke: #3b82f6 !important;
+  stroke-width: 2px !important;
+}
+
+.mermaid .node .label {
+  color: #1f2937 !important;
+}
