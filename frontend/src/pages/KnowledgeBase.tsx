@@ -48,9 +48,10 @@ function getStageIndex(status: string): number {
 }
 
 export const KnowledgeBase: React.FC = () => {
-  const [file, setFile] = useState<File | null>(null)
+  const [files, setFiles] = useState<File[]>([])
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState<ProgressState | null>(null)
+  const [queueIndex, setQueueIndex] = useState<{ current: number; total: number } | null>(null)
   const [docs, setDocs] = useState<IndexedDoc[]>([])
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -90,7 +91,7 @@ export const KnowledgeBase: React.FC = () => {
     }
   }
 
-  const startPolling = (docId: string) => {
+  const startPolling = (docId: string, onTerminal: () => void) => {
     pollingRef.current = setInterval(async () => {
       try {
         const res = await fetch(`/api/v1/knowledge/status/${docId}`)
@@ -98,51 +99,67 @@ export const KnowledgeBase: React.FC = () => {
         if (data.status !== 'unknown') {
           setProgress({ status: data.status, progress_pct: data.progress_pct ?? 0, message: data.message ?? '' })
         }
-        if (TERMINAL_STATUSES.has(data.status)) stopPolling()
+        if (TERMINAL_STATUSES.has(data.status)) {
+          stopPolling()
+          onTerminal()
+        }
       } catch {
         // Ignore polling errors silently
       }
     }, 2000)
   }
 
-  const openProgressWebSocket = (docId: string) => {
-    let receivedTerminal = false
-    const ws = new WebSocket(`ws://localhost:8000/api/v1/knowledge/progress/${docId}`)
-    ws.onmessage = (event) => {
-      const data: ProgressState = JSON.parse(event.data)
-      setProgress(data)
-      if (data.status === 'indexed' || data.status === 'error') {
-        receivedTerminal = true
-        if (data.status === 'indexed') fetchDocs()
-        ws.close()
+  // Returns a Promise that resolves when the file is fully indexed (or errored)
+  const uploadOne = (file: File): Promise<void> => {
+    return new Promise(async (resolve) => {
+      setProgress({ status: 'parsing', progress_pct: 5, message: 'Reading document...' })
+      const formData = new FormData()
+      formData.append('file', file)
+      try {
+        const response = await fetch('/api/v1/knowledge/upload', { method: 'POST', body: formData })
+        if (!response.ok) throw new Error(`Upload failed: ${response.status}`)
+        const data = await response.json()
+
+        let receivedTerminal = false
+        const ws = new WebSocket(`ws://localhost:8000/api/v1/knowledge/progress/${data.document_id}`)
+        ws.onmessage = (event) => {
+          const msg: ProgressState = JSON.parse(event.data)
+          setProgress(msg)
+          if (msg.status === 'indexed' || msg.status === 'error') {
+            receivedTerminal = true
+            if (msg.status === 'indexed') fetchDocs()
+            ws.close()
+            resolve()
+          }
+        }
+        ws.onerror = () => {
+          ws.close()
+          if (!receivedTerminal) {
+            startPolling(data.document_id, () => { fetchDocs(); resolve() })
+          }
+        }
+      } catch (error) {
+        setProgress({ status: 'error', progress_pct: 0, message: `Upload failed: ${String(error)}` })
+        resolve()
       }
-    }
-    ws.onerror = () => {
-      ws.close()
-      if (!receivedTerminal) startPolling(docId)
-    }
+    })
   }
 
   const handleUpload = async () => {
-    if (!file) return
+    if (files.length === 0) return
     setUploading(true)
-    setProgress(null)
-    const formData = new FormData()
-    formData.append('file', file)
-    try {
-      const response = await fetch('/api/v1/knowledge/upload', { method: 'POST', body: formData })
-      if (!response.ok) throw new Error(`Upload failed: ${response.status}`)
-      const data = await response.json()
-      setFile(null)
-      if (inputRef.current) inputRef.current.value = ''
-      // Show pipeline immediately after POST returns; WS will push stage updates
-      setProgress({ status: 'parsing', progress_pct: 5, message: 'Reading document...' })
-      openProgressWebSocket(data.document_id)
-    } catch (error) {
-      setProgress({ status: 'error', progress_pct: 0, message: `Upload failed: ${String(error)}` })
-    } finally {
-      setUploading(false)
+    const queue = [...files]
+    setFiles([])
+    if (inputRef.current) inputRef.current.value = ''
+
+    for (let i = 0; i < queue.length; i++) {
+      setQueueIndex({ current: i + 1, total: queue.length })
+      setProgress(null)
+      await uploadOne(queue[i])
     }
+
+    setQueueIndex(null)
+    setUploading(false)
   }
 
   const activeStage = progress ? getStageIndex(progress.status) : -1
@@ -163,7 +180,7 @@ export const KnowledgeBase: React.FC = () => {
           <HStack px={5} py={3} borderBottom="1px solid" borderColor="gray.100" bg="gray.50" spacing={2}>
             <Icon as={MdUploadFile} color="aws.orange" boxSize={4} />
             <Text fontSize="xs" fontWeight="semibold" color="gray.600" textTransform="uppercase" letterSpacing="wide">
-              Upload Document
+              Upload Documents
             </Text>
           </HStack>
           <Box p={5}>
@@ -176,28 +193,36 @@ export const KnowledgeBase: React.FC = () => {
               w="full"
               h={32}
               border="2px dashed"
-              borderColor={file ? 'aws.orange' : 'gray.300'}
+              borderColor={files.length > 0 ? 'aws.orange' : 'gray.300'}
               borderRadius="lg"
               cursor="pointer"
-              bg={file ? 'orange.50' : 'gray.50'}
+              bg={files.length > 0 ? 'orange.50' : 'gray.50'}
               _hover={{ borderColor: 'aws.orange', bg: 'orange.50' }}
               transition="all 0.15s"
             >
               <Icon as={MdDescription} boxSize={8} color="gray.400" mb={2} />
-              {file ? (
-                <Text fontSize="sm" fontWeight="medium" color="aws.orange">{file.name}</Text>
+              {files.length > 0 ? (
+                <VStack spacing={0}>
+                  <Text fontSize="sm" fontWeight="medium" color="aws.orange">
+                    {files.length === 1 ? files[0].name : `${files.length} files selected`}
+                  </Text>
+                  {files.length > 1 && (
+                    <Text fontSize="xs" color="orange.400">{files.map(f => f.name).join(', ')}</Text>
+                  )}
+                </VStack>
               ) : (
                 <>
-                  <Text fontSize="sm" color="gray.500">Click to select a file</Text>
-                  <Text fontSize="xs" color="gray.400" mt={1}>PDF, Markdown (.md), Plain text (.txt)</Text>
+                  <Text fontSize="sm" color="gray.500">Click to select files</Text>
+                  <Text fontSize="xs" color="gray.400" mt={1}>PDF, Markdown (.md), Plain text (.txt) — multiple allowed</Text>
                 </>
               )}
               <input
                 ref={inputRef}
                 type="file"
                 accept=".pdf,.md,.markdown,.txt"
+                multiple
                 style={{ display: 'none' }}
-                onChange={(e) => { setFile(e.target.files?.[0] || null); setProgress(null) }}
+                onChange={(e) => { setFiles(Array.from(e.target.files ?? [])); setProgress(null) }}
                 disabled={uploading}
               />
             </Box>
@@ -209,17 +234,26 @@ export const KnowledgeBase: React.FC = () => {
               color="aws.squid"
               fontWeight="bold"
               _hover={{ bg: 'aws.orangeDark' }}
-              isDisabled={!file || uploading}
-              isLoading={uploading}
+              isDisabled={files.length === 0 || uploading}
+              isLoading={uploading && !progress}
               loadingText="Uploading…"
               onClick={handleUpload}
             >
-              Upload &amp; Index
+              Upload &amp; Index{files.length > 1 ? ` (${files.length} files)` : ''}
             </Button>
 
             {/* Pipeline stages — shown after POST returns (button spinner covers upload stage) */}
-            {progress && (
+            {(progress || queueIndex) && (
               <VStack mt={5} spacing={3} align="stretch">
+                {/* Queue counter */}
+                {queueIndex && queueIndex.total > 1 && (
+                  <HStack justify="space-between" fontSize="xs" color="gray.500">
+                    <Text>Processing file <strong>{queueIndex.current}</strong> of <strong>{queueIndex.total}</strong></Text>
+                    {progress && <Text textTransform="capitalize" color="aws.orange">{progress.status}</Text>}
+                  </HStack>
+                )}
+                {/* Stage indicators and progress — only when we have progress state */}
+                {progress && (<>
                 {/* Stage indicators */}
                 <HStack spacing={0} align="center">
                   {STAGES.map((stage, i) => {
@@ -331,6 +365,7 @@ export const KnowledgeBase: React.FC = () => {
                     <Text fontSize="sm">{progress.message}</Text>
                   </Alert>
                 )}
+                </>)}
               </VStack>
             )}
           </Box>
