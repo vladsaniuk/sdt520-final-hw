@@ -7,7 +7,7 @@ A five-phase brownfield completion. The scaffold (FastAPI + React + Neo4j + Dock
 ## Phases
 
 - [ ] **Phase 1: Baseline Fixes** - Repair broken foundation so the app starts, compiles, and makes a real LLM call
-- [ ] **Phase 2: Graph Seeding & Document Ingestion** - Seed Neo4j with structural AWS knowledge, wire the full document ingestion pipeline, and add the upload UI — so GraphRAG has real data before chat is wired
+- [x] **Phase 2: Graph Seeding & Document Ingestion** - Seed Neo4j with structural AWS knowledge, wire the full document ingestion pipeline, and add the upload UI — so GraphRAG has real data before chat is wired
 - [ ] **Phase 3: Multi-Turn Chat** - Wire conversation history and structured output for real iterative architecture refinement
 - [ ] **Phase 4: Terraform Download** - Deliver the core artifact: a downloadable, valid Terraform config from an approved plan
 - [ ] **Phase 5: Docker Polish** - End-to-end validation that `docker compose up` produces a working demo with zero manual steps
@@ -45,9 +45,9 @@ Plans:
 **Plans**: 3 plans
 
 Plans:
-- [ ] 02-01-PLAN.md — Schema fix (384-dim index + Architecture_Pattern constraint) + seed service + POST /api/v1/seed
-- [ ] 02-02-PLAN.md — Document ingestion pipeline (parse/chunk/embed/store) + WebSocket progress backend
-- [ ] 02-03-PLAN.md — Vite proxy + KnowledgeBase.tsx live progress bar + VectorCypherRetriever wired into advisor
+- [x] 02-01-PLAN.md — Schema fix (384-dim index + Architecture_Pattern constraint) + seed service + POST /api/v1/seed
+- [x] 02-02-PLAN.md — Document ingestion pipeline (parse/chunk/embed/store) + WebSocket progress backend
+- [x] 02-03-PLAN.md — Vite proxy + KnowledgeBase.tsx live progress bar + VectorCypherRetriever wired into advisor
 
 ### Phase 3: Multi-Turn Chat
 **Goal**: Users can hold iterative conversations where follow-up messages refine the architecture plan in context — this is the core UX value loop
