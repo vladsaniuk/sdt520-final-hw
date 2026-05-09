@@ -179,8 +179,8 @@ export const KnowledgeBase: React.FC = () => {
                   colorScheme={progressColorScheme}
                   borderRadius="full"
                   size="sm"
-                  hasStripe={progress.status === 'indexing'}
-                  isAnimated={progress.status === 'indexing'}
+                  hasStripe={['parsing', 'chunking', 'embedding'].includes(progress.status)}
+                  isAnimated={['parsing', 'chunking', 'embedding'].includes(progress.status)}
                 />
                 <Text fontSize="xs" color="gray.500">{progress.message}</Text>
                 {progress.status === 'indexed' && (
