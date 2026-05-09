@@ -12,7 +12,7 @@ import {
   Alert,
   AlertIcon,
 } from '@chakra-ui/react'
-import { MdUploadFile, MdFolder, MdDescription, MdCheck } from 'react-icons/md'
+import { MdUploadFile, MdFolder, MdDescription, MdCheck, MdDelete } from 'react-icons/md'
 
 interface ProgressState {
   status: string
@@ -54,6 +54,8 @@ export const KnowledgeBase: React.FC = () => {
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
 
+  const [deletingId, setDeletingId] = useState<string | null>(null)
+
   const fetchDocs = useCallback(async () => {
     try {
       const res = await fetch('/api/v1/knowledge/documents')
@@ -65,6 +67,18 @@ export const KnowledgeBase: React.FC = () => {
   }, [])
 
   useEffect(() => { fetchDocs() }, [fetchDocs])
+
+  const handleDelete = async (id: string) => {
+    setDeletingId(id)
+    try {
+      await fetch(`/api/v1/knowledge/documents/${id}`, { method: 'DELETE' })
+      await fetchDocs()
+    } catch {
+      // silently ignore
+    } finally {
+      setDeletingId(null)
+    }
+  }
 
   const TERMINAL_STATUSES = new Set(['indexed', 'error', 'unknown'])
 
@@ -349,6 +363,17 @@ export const KnowledgeBase: React.FC = () => {
                     </Text>
                   </Box>
                   <Badge colorScheme="green" flexShrink={0}>Indexed</Badge>
+                  <Button
+                    size="xs"
+                    variant="ghost"
+                    colorScheme="red"
+                    isLoading={deletingId === doc.id}
+                    onClick={() => handleDelete(doc.id)}
+                    aria-label="Remove document"
+                    flexShrink={0}
+                  >
+                    <Icon as={MdDelete} boxSize={4} />
+                  </Button>
                 </HStack>
               ))}
             </VStack>

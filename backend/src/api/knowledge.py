@@ -92,7 +92,25 @@ async def get_status(document_id: str):
     return {"document_id": document_id, **state}
 
 
-@router.get("/documents")
+@router.delete("/documents/{document_id}")
+async def delete_document(document_id: str):
+    """Delete a KnowledgeDocument and all its Document_Chunk nodes from Neo4j."""
+    kb = KnowledgeBaseService()
+    try:
+        with kb.driver.session() as session:
+            result = session.run("""
+                MATCH (d:KnowledgeDocument {id: $doc_id})
+                OPTIONAL MATCH (c:Document_Chunk)-[:PART_OF]->(d)
+                DETACH DELETE c, d
+                RETURN count(d) AS deleted
+            """, doc_id=document_id)
+            deleted = result.single()["deleted"]
+        if deleted == 0:
+            from fastapi import HTTPException
+            raise HTTPException(status_code=404, detail="Document not found")
+        return {"deleted": document_id}
+    finally:
+        kb.close()
 async def list_documents():
     """
     List all indexed KnowledgeDocument nodes from Neo4j.
