@@ -6,7 +6,6 @@
         "code-review-graph",
         "serve"
       ],
-      "cwd": "/Users/vladsanyuk/Documents/aws-architecture-advisor",
       "type": "stdio"
     }
   }
