@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from 'react'
 import mermaid from 'mermaid'
+import { Box, HStack, Text, Icon } from '@chakra-ui/react'
+import { MdGridView } from 'react-icons/md'
 
 mermaid.initialize({
   startOnLoad: false,
@@ -23,31 +25,15 @@ export const MermaidViewer: React.FC<MermaidViewerProps> = ({ definition }) => {
   }, [definition])
 
   return (
-    <div className="rounded-xl overflow-hidden border border-gray-200 shadow-sm mt-3">
-      {/* Header bar */}
-      <div className="bg-aws-squid px-4 py-2 flex items-center gap-2">
-        <svg
-          className="w-4 h-4 text-aws-orange"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth={2}
-            d="M4 5a1 1 0 011-1h14a1 1 0 011 1v2a1 1 0 01-1 1H5a1 1 0 01-1-1V5zM4 13a1 1 0 011-1h6a1 1 0 011 1v6a1 1 0 01-1 1H5a1 1 0 01-1-1v-6zM16 13a1 1 0 011-1h2a1 1 0 011 1v6a1 1 0 01-1 1h-2a1 1 0 01-1-1v-6z"
-          />
-        </svg>
-        <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">
-          ARCHITECTURE DIAGRAM
-        </span>
-      </div>
-      {/* Diagram area — containerRef stays here so mermaid.run() targets this element */}
-      <div
-        className="mermaid bg-white p-4 min-h-[200px]"
-        ref={containerRef}
-      />
-    </div>
+    <Box borderRadius="xl" overflow="hidden" border="1px solid" borderColor="gray.200" boxShadow="sm" mt={3}>
+      <HStack px={4} py={2} bg="aws.squid" spacing={2}>
+        <Icon as={MdGridView} color="aws.orange" boxSize={4} />
+        <Text fontSize="xs" fontWeight="bold" color="gray.300" textTransform="uppercase" letterSpacing="widest">
+          Architecture Diagram
+        </Text>
+      </HStack>
+      {/* containerRef must stay on the inner .mermaid div — mermaid.run() targets this element */}
+      <Box className="mermaid" bg="white" p={4} minH="200px" ref={containerRef} />
+    </Box>
   )
 }

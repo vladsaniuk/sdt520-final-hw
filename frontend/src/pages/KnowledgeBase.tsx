@@ -1,4 +1,18 @@
 import React, { useState, useRef } from 'react'
+import {
+  Box,
+  VStack,
+  HStack,
+  Text,
+  Button,
+  Icon,
+  Progress,
+  Badge,
+  Divider,
+  Alert,
+  AlertIcon,
+} from '@chakra-ui/react'
+import { MdUploadFile, MdFolder, MdDescription } from 'react-icons/md'
 
 interface ProgressState {
   status: string
@@ -16,6 +30,7 @@ export const KnowledgeBase: React.FC = () => {
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState<ProgressState | null>(null)
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const inputRef = useRef<HTMLInputElement>(null)
 
   const startPolling = (docId: string) => {
     pollingRef.current = setInterval(async () => {
@@ -64,111 +79,135 @@ export const KnowledgeBase: React.FC = () => {
     }
   }
 
-  const progressColor =
-    progress?.status === 'indexed' ? 'bg-green-500' : progress?.status === 'error' ? 'bg-red-500' : 'bg-aws-orange'
+  const progressColorScheme =
+    progress?.status === 'indexed' ? 'green' : progress?.status === 'error' ? 'red' : 'orange'
 
   return (
-    <div className="h-full overflow-y-auto bg-gray-50 px-6 py-8">
-      <div className="max-w-3xl mx-auto space-y-6">
-        <div>
-          <h2 className="text-xl font-bold text-gray-900">Knowledge Base</h2>
-          <p className="text-sm text-gray-500 mt-1">
+    <Box h="full" overflowY="auto" bg="gray.50" px={6} py={8}>
+      <VStack maxW="3xl" mx="auto" spacing={6} align="stretch">
+        <Box>
+          <Text fontSize="xl" fontWeight="bold" color="gray.900">Knowledge Base</Text>
+          <Text fontSize="sm" color="gray.500" mt={1}>
             Upload AWS documentation to ground the advisor's recommendations in your own sources.
-          </p>
-        </div>
+          </Text>
+        </Box>
 
         {/* Upload card */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-100 bg-gray-50">
-            <svg className="w-4 h-4 text-aws-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12" />
-            </svg>
-            <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Upload Document</span>
-          </div>
-          <div className="p-5">
-            <label
-              className={`flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg cursor-pointer transition-colors ${
-                file ? 'border-aws-orange bg-orange-50' : 'border-gray-300 bg-gray-50 hover:border-aws-orange hover:bg-orange-50/30'
-              }`}
+        <Box bg="white" borderRadius="xl" border="1px solid" borderColor="gray.200" boxShadow="sm" overflow="hidden">
+          <HStack px={5} py={3} borderBottom="1px solid" borderColor="gray.100" bg="gray.50" spacing={2}>
+            <Icon as={MdUploadFile} color="aws.orange" boxSize={4} />
+            <Text fontSize="xs" fontWeight="semibold" color="gray.600" textTransform="uppercase" letterSpacing="wide">
+              Upload Document
+            </Text>
+          </HStack>
+          <Box p={5}>
+            <Box
+              as="label"
+              display="flex"
+              flexDirection="column"
+              alignItems="center"
+              justifyContent="center"
+              w="full"
+              h={32}
+              border="2px dashed"
+              borderColor={file ? 'aws.orange' : 'gray.300'}
+              borderRadius="lg"
+              cursor="pointer"
+              bg={file ? 'orange.50' : 'gray.50'}
+              _hover={{ borderColor: 'aws.orange', bg: 'orange.50' }}
+              transition="all 0.15s"
             >
-              <svg className="w-8 h-8 text-gray-400 mb-2" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z" />
-              </svg>
+              <Icon as={MdDescription} boxSize={8} color="gray.400" mb={2} />
               {file ? (
-                <p className="text-sm font-medium text-aws-orange">{file.name}</p>
+                <Text fontSize="sm" fontWeight="medium" color="aws.orange">{file.name}</Text>
               ) : (
                 <>
-                  <p className="text-sm text-gray-500">Click to select a file</p>
-                  <p className="text-xs text-gray-400 mt-1">PDF, Markdown (.md), Plain text (.txt)</p>
+                  <Text fontSize="sm" color="gray.500">Click to select a file</Text>
+                  <Text fontSize="xs" color="gray.400" mt={1}>PDF, Markdown (.md), Plain text (.txt)</Text>
                 </>
               )}
               <input
+                ref={inputRef}
                 type="file"
                 accept=".pdf,.md,.markdown,.txt"
-                className="hidden"
+                style={{ display: 'none' }}
                 onChange={(e) => { setFile(e.target.files?.[0] || null); setProgress(null) }}
                 disabled={uploading}
               />
-            </label>
+            </Box>
 
-            <button
+            <Button
+              mt={4}
+              w="full"
+              bg="aws.orange"
+              color="aws.squid"
+              fontWeight="bold"
+              _hover={{ bg: 'aws.orangeDark' }}
+              isDisabled={!file || uploading}
+              isLoading={uploading}
+              loadingText="Uploading…"
               onClick={handleUpload}
-              disabled={!file || uploading}
-              className="mt-4 w-full py-2.5 rounded-lg bg-aws-orange text-aws-squid font-semibold text-sm hover:bg-aws-orange-dark disabled:bg-gray-200 disabled:text-gray-400 disabled:cursor-not-allowed transition-colors"
             >
-              {uploading ? 'Uploading…' : 'Upload & Index'}
-            </button>
+              Upload &amp; Index
+            </Button>
 
             {progress && (
-              <div className="mt-4">
-                <div className="flex justify-between text-xs text-gray-500 mb-1">
-                  <span className="capitalize">{progress.status}</span>
-                  <span>{progress.progress_pct}%</span>
-                </div>
-                <div className="w-full bg-gray-200 rounded-full h-2">
-                  <div
-                    className={`h-2 rounded-full transition-all duration-500 ${progressColor}`}
-                    style={{ width: `${progress.progress_pct}%` }}
-                  />
-                </div>
-                <p className="mt-1 text-xs text-gray-500">{progress.message}</p>
+              <VStack mt={4} spacing={1} align="stretch">
+                <HStack justify="space-between" fontSize="xs" color="gray.500">
+                  <Text textTransform="capitalize">{progress.status}</Text>
+                  <Text>{progress.progress_pct}%</Text>
+                </HStack>
+                <Progress
+                  value={progress.progress_pct}
+                  colorScheme={progressColorScheme}
+                  borderRadius="full"
+                  size="sm"
+                  hasStripe={progress.status === 'indexing'}
+                  isAnimated={progress.status === 'indexing'}
+                />
+                <Text fontSize="xs" color="gray.500">{progress.message}</Text>
                 {progress.status === 'indexed' && (
-                  <p className="mt-2 text-sm text-green-600 font-semibold">✓ Document indexed successfully</p>
+                  <Alert status="success" borderRadius="md" py={2}>
+                    <AlertIcon />
+                    <Text fontSize="sm">Document indexed successfully</Text>
+                  </Alert>
                 )}
                 {progress.status === 'error' && (
-                  <p className="mt-2 text-sm text-red-600 font-semibold">✗ {progress.message}</p>
+                  <Alert status="error" borderRadius="md" py={2}>
+                    <AlertIcon />
+                    <Text fontSize="sm">{progress.message}</Text>
+                  </Alert>
                 )}
-              </div>
+              </VStack>
             )}
-          </div>
-        </div>
+          </Box>
+        </Box>
 
-        {/* Indexed documents — mock data for demo */}
-        <div className="bg-white rounded-xl border border-gray-200 shadow-sm overflow-hidden">
-          <div className="flex items-center gap-2 px-5 py-3 border-b border-gray-100 bg-gray-50">
-            <svg className="w-4 h-4 text-aws-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M5 8h14M5 8a2 2 0 110-4h14a2 2 0 110 4M5 8v10a2 2 0 002 2h10a2 2 0 002-2V8m-9 4h4" />
-            </svg>
-            <span className="text-xs font-semibold text-gray-600 uppercase tracking-wide">Indexed Documents</span>
-            <span className="ml-auto text-xs text-gray-400 italic">sample data</span>
-          </div>
-          <ul className="divide-y divide-gray-100">
+        {/* Indexed documents */}
+        <Box bg="white" borderRadius="xl" border="1px solid" borderColor="gray.200" boxShadow="sm" overflow="hidden">
+          <HStack px={5} py={3} borderBottom="1px solid" borderColor="gray.100" bg="gray.50" spacing={2} justify="space-between">
+            <HStack spacing={2}>
+              <Icon as={MdFolder} color="aws.orange" boxSize={4} />
+              <Text fontSize="xs" fontWeight="semibold" color="gray.600" textTransform="uppercase" letterSpacing="wide">
+                Indexed Documents
+              </Text>
+            </HStack>
+            <Badge colorScheme="gray" fontSize="10px" fontStyle="italic">sample data</Badge>
+          </HStack>
+          <VStack divider={<Divider />} spacing={0} align="stretch">
             {MOCK_INDEXED_DOCS.map((doc) => (
-              <li key={doc.name} className="flex items-center gap-4 px-5 py-3">
-                <svg className="w-5 h-5 text-gray-400 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.5} d="M7 21h10a2 2 0 002-2V9.414a1 1 0 00-.293-.707l-5.414-5.414A1 1 0 0012.586 3H7a2 2 0 00-2 2v14a2 2 0 002 2z" />
-                </svg>
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm text-gray-800 font-medium truncate">{doc.name}</p>
-                  <p className="text-xs text-gray-400">{doc.size} · {doc.chunks} chunks · {doc.date}</p>
-                </div>
-                <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-700 font-medium shrink-0">Indexed</span>
-              </li>
+              <HStack key={doc.name} px={5} py={3} spacing={4}>
+                <Icon as={MdDescription} color="gray.400" boxSize={5} flexShrink={0} />
+                <Box flex={1} minW={0}>
+                  <Text fontSize="sm" color="gray.800" fontWeight="medium" noOfLines={1}>{doc.name}</Text>
+                  <Text fontSize="xs" color="gray.400">{doc.size} · {doc.chunks} chunks · {doc.date}</Text>
+                </Box>
+                <Badge colorScheme="green" flexShrink={0}>Indexed</Badge>
+              </HStack>
             ))}
-          </ul>
-        </div>
-      </div>
-    </div>
+          </VStack>
+        </Box>
+      </VStack>
+    </Box>
   )
 }
-

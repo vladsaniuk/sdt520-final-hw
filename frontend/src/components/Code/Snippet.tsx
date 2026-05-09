@@ -1,6 +1,7 @@
 import React, { useState } from 'react'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { Box, HStack, Text, Button } from '@chakra-ui/react'
 
 interface CodeSnippetProps {
   code: string
@@ -17,20 +18,22 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({ code, language }) => {
   }
 
   return (
-    <div className="rounded-xl overflow-hidden border border-gray-700 shadow-sm my-2">
-      {/* Header bar */}
-      <div className="bg-aws-squid px-4 py-2 flex justify-between items-center">
-        <span className="text-xs font-bold text-gray-300 font-mono uppercase tracking-widest">
+    <Box borderRadius="xl" overflow="hidden" border="1px solid" borderColor="gray.700" boxShadow="sm" my={2}>
+      <HStack px={4} py={2} bg="aws.squid" justify="space-between">
+        <Text fontSize="xs" fontWeight="bold" color="gray.300" fontFamily="mono" textTransform="uppercase" letterSpacing="widest">
           {language.toUpperCase()}
-        </span>
-        <button
+        </Text>
+        <Button
+          variant="ghost"
+          size="xs"
+          color={copied ? 'aws.orange' : 'gray.400'}
+          _hover={{ color: 'aws.orange', bg: 'transparent' }}
           onClick={handleCopy}
-          className="text-xs text-gray-400 hover:text-aws-orange transition-colors font-sans"
+          fontFamily="body"
         >
           {copied ? 'Copied!' : 'Copy code'}
-        </button>
-      </div>
-      {/* Code body */}
+        </Button>
+      </HStack>
       <SyntaxHighlighter
         language={language}
         style={vscDarkPlus}
@@ -43,6 +46,6 @@ export const CodeSnippet: React.FC<CodeSnippetProps> = ({ code, language }) => {
       >
         {code}
       </SyntaxHighlighter>
-    </div>
+    </Box>
   )
 }

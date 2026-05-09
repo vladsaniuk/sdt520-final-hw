@@ -1,4 +1,23 @@
 import React, { useState, useRef, useEffect } from 'react'
+import {
+  Box,
+  Flex,
+  VStack,
+  HStack,
+  Text,
+  Textarea,
+  IconButton,
+  Icon,
+  Button,
+  Avatar,
+  useToast,
+  Alert,
+  AlertIcon,
+  CloseButton,
+  Spinner,
+  Tag,
+} from '@chakra-ui/react'
+import { MdSend, MdBolt } from 'react-icons/md'
 import { MermaidViewer } from '../Diagram/MermaidViewer'
 import { CodeSnippet } from '../Code/Snippet'
 import { CostTable } from '../Cost/CostTable'
@@ -27,23 +46,25 @@ interface Message {
   costs?: Costs
 }
 
+const PROMPT_CHIPS = [
+  'Serverless e-commerce API',
+  'Multi-region DR setup',
+  'ML inference pipeline',
+  'Event-driven microservices',
+]
 
 export const ChatBox: React.FC = () => {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
-  const [toast, setToast] = useState<string | null>(null)
   const [error, setError] = useState<string | null>(null)
   const bottomRef = useRef<HTMLDivElement>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const toast = useToast()
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
-
-  const showToast = (msg: string) => {
-    setToast(msg)
-    setTimeout(() => setToast(null), 3000)
-  }
 
   const handleSend = async () => {
     if (!input.trim()) return
@@ -78,171 +99,181 @@ export const ChatBox: React.FC = () => {
     }
   }
 
+  const showDownloadToast = () => {
+    toast({
+      title: 'Coming soon',
+      description: 'Terraform download will be available in Phase 5.',
+      status: 'info',
+      duration: 3000,
+      isClosable: true,
+      position: 'bottom',
+    })
+  }
+
   return (
-    <div className="flex flex-col h-full bg-gray-50">
+    <Flex direction="column" h="full" bg="gray.50">
       {/* Messages / Welcome */}
-      <div className={`flex-1 overflow-y-auto ${messages.length > 0 ? 'px-4 py-6 space-y-6' : 'flex'}`}>
+      <Box flex={1} overflowY="auto" display={messages.length === 0 ? 'flex' : 'block'}>
         {messages.length === 0 ? (
           /* Welcome screen */
-          <div className="flex flex-col items-center justify-center flex-1 gap-6 px-4">
-            {/* Logo area */}
-            <div className="flex flex-col items-center gap-3">
-              <div className="w-14 h-14 rounded-2xl bg-aws-orange flex items-center justify-center">
-                <svg className="w-8 h-8 text-aws-squid" viewBox="0 0 24 24" fill="currentColor">
-                  <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-                </svg>
-              </div>
-              <h1 className="text-2xl font-bold text-aws-squid">AWS Architecture Advisor</h1>
-              <p className="text-sm text-gray-500 text-center max-w-xs leading-relaxed">
+          <Flex direction="column" align="center" justify="center" flex={1} gap={6} px={4}>
+            <VStack spacing={3} align="center">
+              <Flex
+                w={16} h={16} borderRadius="2xl" bg="aws.orange"
+                align="center" justify="center"
+                boxShadow="0 4px 24px rgba(255,153,0,0.35)"
+              >
+                <Icon as={MdBolt} color="aws.squid" boxSize={9} />
+              </Flex>
+              <Text fontSize="2xl" fontWeight="bold" color="aws.squid">AWS Architecture Advisor</Text>
+              <Text fontSize="sm" color="gray.500" textAlign="center" maxW="xs" lineHeight="relaxed">
                 Describe your AWS workload to get a production-ready architecture plan.
-              </p>
-            </div>
-            {/* Prompt chips */}
-            <div className="flex flex-wrap gap-2 justify-center max-w-lg">
-              {[
-                'Serverless e-commerce API',
-                'Multi-region DR setup',
-                'ML inference pipeline',
-                'Event-driven microservices',
-              ].map((chip) => (
-                <button
+              </Text>
+            </VStack>
+            <Flex wrap="wrap" gap={2} justify="center" maxW="lg">
+              {PROMPT_CHIPS.map((chip) => (
+                <Tag
                   key={chip}
+                  as="button"
+                  size="md"
+                  variant="outline"
+                  borderRadius="full"
+                  cursor="pointer"
+                  px={4} py={2}
+                  borderColor="gray.300"
+                  color="gray.700"
+                  _hover={{ borderColor: 'aws.orange', color: 'aws.squid', bg: 'orange.50' }}
+                  transition="all 0.15s"
                   onClick={() => setInput(chip)}
-                  className="px-4 py-2 rounded-full border border-gray-300 text-sm text-gray-700 hover:border-aws-orange hover:text-aws-squid hover:bg-aws-orange/10 transition-colors cursor-pointer"
                 >
                   {chip}
-                </button>
+                </Tag>
               ))}
-            </div>
-          </div>
+            </Flex>
+          </Flex>
         ) : (
           /* Message list */
-          <>
+          <VStack px={4} py={6} spacing={6} align="stretch">
             {messages.map((msg, i) => (
-              <div key={i} className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}>
-                {/* Avatar — assistant */}
+              <Flex key={i} gap={3} justify={msg.role === 'user' ? 'flex-end' : 'flex-start'}>
                 {msg.role === 'assistant' && (
-                  <div className="w-8 h-8 rounded-full bg-aws-orange flex items-center justify-center shrink-0 mt-1 shadow-sm">
-                    <svg className="w-4 h-4 text-aws-squid" viewBox="0 0 24 24" fill="currentColor">
-                      <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-                    </svg>
-                  </div>
+                  <Flex
+                    w={8} h={8} borderRadius="full" bg="aws.orange"
+                    align="center" justify="center" flexShrink={0} mt={1}
+                    boxShadow="sm"
+                  >
+                    <Icon as={MdBolt} color="aws.squid" boxSize={4} />
+                  </Flex>
                 )}
 
-                <div className={`max-w-3xl ${msg.role === 'user' ? 'order-first' : ''}`}>
-                  {/* Bubble */}
-                  <div
-                    className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
-                      msg.role === 'user'
-                        ? 'bg-aws-squid text-white rounded-tr-sm ml-auto'
-                        : 'bg-white border border-gray-200 text-gray-800 rounded-tl-sm shadow-sm'
-                    }`}
+                <Box maxW="3xl">
+                  <Box
+                    px={4} py={3}
+                    borderRadius={msg.role === 'user' ? '2xl' : '2xl'}
+                    borderTopRightRadius={msg.role === 'user' ? 'sm' : undefined}
+                    borderTopLeftRadius={msg.role === 'assistant' ? 'sm' : undefined}
+                    bg={msg.role === 'user' ? 'aws.squid' : 'white'}
+                    color={msg.role === 'user' ? 'white' : 'gray.800'}
+                    border={msg.role === 'assistant' ? '1px solid' : undefined}
+                    borderColor="gray.200"
+                    boxShadow="sm"
+                    ml={msg.role === 'user' ? 'auto' : undefined}
+                    fontSize="sm"
+                    lineHeight="relaxed"
                   >
-                    <p className="whitespace-pre-wrap">{msg.content}</p>
-                  </div>
+                    <Text whiteSpace="pre-wrap">{msg.content}</Text>
+                  </Box>
 
-                  {/* Rich panels — only on assistant messages */}
                   {msg.role === 'assistant' && (
                     <>
-                      {/* DIAGRAM — MermaidViewer owns its panel; no outer wrapper */}
-                      {msg.diagram && (
-                        <MermaidViewer definition={msg.diagram} />
-                      )}
-
-                      {/* COST — CostTable owns its panel; no outer wrapper */}
+                      {msg.diagram && <MermaidViewer definition={msg.diagram} />}
                       {msg.costs && msg.costs.breakdown.length > 0 && (
                         <CostTable total={msg.costs.total} breakdown={msg.costs.breakdown} />
                       )}
-
-                      {/* IaC / TERRAFORM — ChatBox keeps this panel (has download button) */}
                       {msg.iac && msg.iac.length > 0 && (
-                        <div className="mt-3 rounded-xl overflow-hidden border border-gray-200 shadow-sm">
-                          {/* Updated header: aws-squid to match other panels */}
-                          <div className="flex items-center justify-between px-4 py-2 bg-aws-squid border-b border-aws-squid-light">
-                            <div className="flex items-center gap-2">
-                              <svg className="w-4 h-4 text-aws-orange" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M10 20l4-16m4 4l4 4-4 4M6 16l-4-4 4-4" />
-                              </svg>
-                              <span className="text-xs font-bold text-gray-300 uppercase tracking-widest">TERRAFORM</span>
-                            </div>
-                            {/* Download button — Phase 5 will wire real generation */}
-                            <button
-                              onClick={() => showToast('⬇️ Terraform download coming in Phase 5')}
-                              className="flex items-center gap-1.5 text-xs px-3 py-1 rounded-md bg-aws-orange text-aws-squid font-semibold hover:bg-aws-orange-dark transition-colors"
+                        <Box mt={3} borderRadius="xl" overflow="hidden" border="1px solid" borderColor="gray.200" boxShadow="sm">
+                          <HStack px={4} py={2} bg="aws.squid" borderBottom="1px solid" borderColor="aws.squidLight" justify="space-between">
+                            <HStack spacing={2}>
+                              <Text fontSize="xs" fontWeight="bold" color="gray.300" textTransform="uppercase" letterSpacing="widest">
+                                Terraform
+                              </Text>
+                            </HStack>
+                            <Button
+                              size="xs"
+                              bg="aws.orange"
+                              color="aws.squid"
+                              fontWeight="bold"
+                              _hover={{ bg: 'aws.orangeDark' }}
+                              onClick={showDownloadToast}
                             >
-                              <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-4l-4 4m0 0l-4-4m4 4V4" />
-                              </svg>
                               Download .tf
-                            </button>
-                          </div>
-                          <div className="p-4 space-y-3">
-                            {msg.iac.map((snippet, j) => (
-                              <CodeSnippet
-                                key={j}
-                                code={snippet.content}
-                                language={snippet.type === 'terraform' ? 'hcl' : 'yaml'}
-                              />
-                            ))}
-                          </div>
-                        </div>
+                            </Button>
+                          </HStack>
+                          <Box p={4}>
+                            <VStack spacing={3} align="stretch">
+                              {msg.iac.map((snippet, j) => (
+                                <CodeSnippet
+                                  key={j}
+                                  code={snippet.content}
+                                  language={snippet.type === 'terraform' ? 'hcl' : 'yaml'}
+                                />
+                              ))}
+                            </VStack>
+                          </Box>
+                        </Box>
                       )}
                     </>
                   )}
-                </div>
+                </Box>
 
-                {/* Avatar — user */}
                 {msg.role === 'user' && (
-                  <div className="w-8 h-8 rounded-full bg-gray-300 flex items-center justify-center shrink-0 mt-1 text-gray-600 font-bold text-sm">
-                    U
-                  </div>
+                  <Avatar size="sm" name="U" bg="gray.300" color="gray.700" mt={1} flexShrink={0} />
                 )}
-              </div>
+              </Flex>
             ))}
 
-            {/* Loading indicator */}
             {loading && (
-              <div className="flex gap-3 justify-start">
-                <div className="w-8 h-8 rounded-full bg-aws-orange flex items-center justify-center shrink-0 shadow-sm">
-                  <svg className="w-4 h-4 text-aws-squid" viewBox="0 0 24 24" fill="currentColor">
-                    <path d="M13 2L3 14h9l-1 8 10-12h-9l1-8z" />
-                  </svg>
-                </div>
-                <div className="bg-white border border-gray-200 rounded-2xl rounded-tl-sm px-4 py-3 shadow-sm">
-                  <div className="flex gap-1 items-center h-5">
-                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:0ms]" />
-                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:150ms]" />
-                    <span className="w-2 h-2 bg-gray-400 rounded-full animate-bounce [animation-delay:300ms]" />
-                  </div>
-                </div>
-              </div>
+              <Flex gap={3} justify="flex-start">
+                <Flex w={8} h={8} borderRadius="full" bg="aws.orange" align="center" justify="center" flexShrink={0} boxShadow="sm">
+                  <Icon as={MdBolt} color="aws.squid" boxSize={4} />
+                </Flex>
+                <Box bg="white" border="1px solid" borderColor="gray.200" borderRadius="2xl" borderTopLeftRadius="sm" px={4} py={3} boxShadow="sm">
+                  <HStack spacing={1} h={5} align="center">
+                    <Spinner size="xs" color="gray.400" />
+                    <Text fontSize="xs" color="gray.400">Thinking…</Text>
+                  </HStack>
+                </Box>
+              </Flex>
             )}
-            <div ref={bottomRef} />
-          </>
+            <Box ref={bottomRef} />
+          </VStack>
         )}
-      </div>
+      </Box>
 
-      {/* Inline error banner */}
+      {/* Error banner */}
       {error && (
-        <div className="mx-4 mb-3 flex items-center gap-2 px-4 py-3 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm">
-          <svg className="w-4 h-4 shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L3.732 16.5C2.962 18.333 3.924 20 5.464 20z" />
-          </svg>
-          <span className="flex-1">Something went wrong — please try again.</span>
-          <button
-            onClick={() => setError(null)}
-            className="ml-auto text-red-400 hover:text-red-600"
-          >
-            ×
-          </button>
-        </div>
+        <Alert status="error" mx={4} mb={3} borderRadius="lg">
+          <AlertIcon />
+          <Text flex={1} fontSize="sm">{error}</Text>
+          <CloseButton onClick={() => setError(null)} />
+        </Alert>
       )}
-      <div className="shrink-0 bg-white border-t border-gray-200 px-4 py-3">
-        <div className="max-w-3xl mx-auto flex gap-2 items-end">
-          <textarea
-            className="flex-1 resize-none p-3 border border-gray-300 rounded-xl text-sm focus:ring-2 focus:ring-aws-orange/40 focus:border-aws-orange focus:outline-none max-h-40 min-h-[44px]"
-            placeholder="Describe your AWS workload…"
+
+      {/* Input area */}
+      <Box flexShrink={0} bg="white" borderTop="1px solid" borderColor="gray.200" px={4} py={3}>
+        <HStack maxW="3xl" mx="auto" align="flex-end" spacing={2}>
+          <Textarea
+            ref={textareaRef}
+            flex={1}
+            resize="none"
             rows={1}
+            placeholder="Describe your AWS workload…"
+            fontSize="sm"
+            borderRadius="xl"
+            borderColor="gray.300"
+            _focus={{ borderColor: 'aws.orange', boxShadow: '0 0 0 1px #FF9900' }}
+            maxH="160px"
+            minH="44px"
             value={input}
             onChange={(e) => {
               setInput(e.target.value)
@@ -256,26 +287,25 @@ export const ChatBox: React.FC = () => {
               }
             }}
           />
-          <button
+          <IconButton
+            aria-label="Send"
+            icon={<Icon as={MdSend} />}
+            isDisabled={loading || !input.trim()}
             onClick={handleSend}
-            disabled={loading || !input.trim()}
-            className="h-11 w-11 rounded-xl bg-aws-orange hover:bg-aws-orange-dark disabled:bg-gray-200 disabled:cursor-not-allowed transition-colors flex items-center justify-center shrink-0"
-          >
-            <svg className="w-5 h-5 text-aws-squid disabled:text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 12h14M12 5l7 7-7 7" />
-            </svg>
-          </button>
-        </div>
-        <p className="text-center text-xs text-gray-400 mt-2">Shift+Enter for new line · Enter to send</p>
-      </div>
-
-      {/* Toast notification */}
-      {toast && (
-        <div className="fixed bottom-20 left-1/2 -translate-x-1/2 bg-aws-squid text-white text-sm px-4 py-2 rounded-full shadow-lg z-50 animate-bounce-once">
-          {toast}
-        </div>
-      )}
-    </div>
+            bg="aws.orange"
+            color="aws.squid"
+            _hover={{ bg: 'aws.orangeDark' }}
+            _disabled={{ bg: 'gray.200', color: 'gray.400', cursor: 'not-allowed' }}
+            borderRadius="xl"
+            h="44px"
+            w="44px"
+            flexShrink={0}
+          />
+        </HStack>
+        <Text textAlign="center" fontSize="xs" color="gray.400" mt={2}>
+          Shift+Enter for new line · Enter to send
+        </Text>
+      </Box>
+    </Flex>
   )
 }
-
