@@ -214,12 +214,12 @@ export const KnowledgeBase: React.FC = () => {
                 const invalid = all.filter(f => !allowed.some(ext => f.name.toLowerCase().endsWith(ext)))
                 if (invalid.length > 0) {
                   toast({
-                    title: `Unsupported file${invalid.length > 1 ? 's' : ''} ignored`,
-                    description: invalid.map(f => f.name).join(', '),
+                    title: `Unsupported file${invalid.length > 1 ? 's' : ''} dropped`,
+                    description: `Only PDF, Markdown, and plain text files are supported. Ignored: ${invalid.map(f => f.name).join(', ')}`,
                     status: 'warning',
-                    duration: 4000,
+                    duration: 5000,
                     isClosable: true,
-                    position: 'top-right',
+                    position: 'bottom',
                   })
                 }
                 if (valid.length > 0) { setFiles(valid); setProgress(null) }
