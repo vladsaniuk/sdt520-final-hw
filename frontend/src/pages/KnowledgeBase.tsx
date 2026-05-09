@@ -55,6 +55,7 @@ export const KnowledgeBase: React.FC = () => {
   const [docs, setDocs] = useState<IndexedDoc[]>([])
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+  const [dragging, setDragging] = useState(false)
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
@@ -185,7 +186,6 @@ export const KnowledgeBase: React.FC = () => {
           </HStack>
           <Box p={5}>
             <Box
-              as="label"
               display="flex"
               flexDirection="column"
               alignItems="center"
@@ -193,12 +193,23 @@ export const KnowledgeBase: React.FC = () => {
               w="full"
               h={32}
               border="2px dashed"
-              borderColor={files.length > 0 ? 'aws.orange' : 'gray.300'}
+              borderColor={dragging ? 'aws.orange' : files.length > 0 ? 'aws.orange' : 'gray.300'}
               borderRadius="lg"
               cursor="pointer"
-              bg={files.length > 0 ? 'orange.50' : 'gray.50'}
+              bg={dragging ? 'orange.100' : files.length > 0 ? 'orange.50' : 'gray.50'}
               _hover={{ borderColor: 'aws.orange', bg: 'orange.50' }}
               transition="all 0.15s"
+              onDragOver={(e) => { e.preventDefault(); if (!uploading) setDragging(true) }}
+              onDragEnter={(e) => { e.preventDefault(); if (!uploading) setDragging(true) }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={(e) => {
+                e.preventDefault()
+                setDragging(false)
+                if (uploading) return
+                const dropped = Array.from(e.dataTransfer.files)
+                if (dropped.length > 0) { setFiles(dropped); setProgress(null) }
+              }}
+              onClick={() => !uploading && inputRef.current?.click()}
             >
               <Icon as={MdDescription} boxSize={8} color="gray.400" mb={2} />
               {files.length > 0 ? (
@@ -212,7 +223,7 @@ export const KnowledgeBase: React.FC = () => {
                 </VStack>
               ) : (
                 <>
-                  <Text fontSize="sm" color="gray.500">Click to select files</Text>
+                  <Text fontSize="sm" color="gray.500">Drag & drop files or click to select</Text>
                   <Text fontSize="xs" color="gray.400" mt={1}>PDF, Markdown (.md), Plain text (.txt) — multiple allowed</Text>
                 </>
               )}
