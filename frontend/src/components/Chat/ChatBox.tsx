@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react'
+import React, { useState, useRef, useEffect, forwardRef, useImperativeHandle, useCallback } from 'react'
 import {
   Box,
   Flex,
@@ -17,7 +17,7 @@ import {
   Spinner,
   Tag,
 } from '@chakra-ui/react'
-import { MdSend, MdBolt } from 'react-icons/md'
+import { MdSend, MdBolt, MdWarning, MdCompress, MdClear } from 'react-icons/md'
 import { MermaidViewer } from '../Diagram/MermaidViewer'
 import { CodeSnippet } from '../Code/Snippet'
 import { CostTable } from '../Cost/CostTable'
@@ -38,12 +38,81 @@ interface Costs {
   breakdown: CostBreakdown[]
 }
 
+interface ServiceItem {
+  name: string
+  description: string
+  rationale: string
+}
+
 interface Message {
-  role: 'user' | 'assistant'
+  role: 'user' | 'assistant' | 'error'
   content: string
   diagram?: string
   iac?: IaC[]
   costs?: Costs
+  services?: ServiceItem[]
+}
+
+interface StoredMessage {
+  role: 'human' | 'ai'
+  content: string
+}
+
+export interface ChatBoxHandle {
+  compact: () => Promise<void>
+  clear: () => Promise<void>
+  hasMessages: () => boolean
+}
+
+interface ChatBoxProps {
+  conversationId?: string
+  onSessionUpdate?: (
+    id: string,
+    messages: Message[],
+    updatedAt: number,
+  ) => void
+}
+
+const MODEL_MAX_TOKENS = 128_000
+const WARN_THRESHOLD = 75
+
+function estimateFillPercent(messages: Message[], currentInput: string): number {
+  const allText = messages.map(m => m.content).join('') + currentInput
+  const estimatedTokens = Math.ceil(allText.length / 4)
+  return Math.min(Math.round((estimatedTokens / MODEL_MAX_TOKENS) * 100), 100)
+}
+
+function computeDiff(
+  prev: ServiceItem[] | undefined,
+  curr: ServiceItem[]
+): { added: string[]; removed: string[] } {
+  if (!prev || prev.length === 0) return { added: [], removed: [] }
+  const prevNames = new Set(prev.map(s => s.name))
+  const currNames = new Set(curr.map(s => s.name))
+  return {
+    added: curr.map(s => s.name).filter(n => !prevNames.has(n)),
+    removed: prev.map(s => s.name).filter(n => !currNames.has(n)),
+  }
+}
+
+function serializeHistory(messages: Message[]): StoredMessage[] {
+  return messages
+    .filter(m => m.role === 'user' || m.role === 'assistant')
+    .map(m => ({
+      role: m.role === 'user' ? 'human' : 'ai',
+      content: m.content,
+    }))
+}
+
+function getRelativeTime(ts: number): string {
+  const diffMs = Date.now() - ts
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return 'just now'
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  const diffDay = Math.floor(diffHr / 24)
+  return diffDay === 1 ? 'Yesterday' : `${diffDay}d ago`
 }
 
 const PROMPT_CHIPS = [
@@ -53,7 +122,8 @@ const PROMPT_CHIPS = [
   'Event-driven microservices',
 ]
 
-export const ChatBox: React.FC = () => {
+export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
+  ({ conversationId: externalConvId, onSessionUpdate }, ref) => {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
@@ -62,42 +132,191 @@ export const ChatBox: React.FC = () => {
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const toast = useToast()
 
+  // Conversation identity
+  const [conversationId, setConversationId] = useState<string>(() => {
+    if (externalConvId) return externalConvId
+    return localStorage.getItem('aws_advisor_conv_id') || crypto.randomUUID()
+  })
+
+  // Context fill tracking
+  const [fillPercent, setFillPercent] = useState(0)
+  const [warningDismissed, setWarningDismissed] = useState(false)
+  const [isCompacting, setIsCompacting] = useState(false)
+  const [clearConfirming, setClearConfirming] = useState(false)
+
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
+
+  // Restore history from localStorage on mount
+  useEffect(() => {
+    const storedHistory = localStorage.getItem(`aws_advisor_history_${conversationId}`)
+    if (storedHistory) {
+      try {
+        const parsed: StoredMessage[] = JSON.parse(storedHistory)
+        const restored: Message[] = parsed.map(m => ({
+          role: m.role === 'human' ? 'user' : 'assistant',
+          content: m.content,
+        }))
+        setMessages(restored)
+        setFillPercent(estimateFillPercent(restored, ''))
+      } catch {
+        // Corrupt storage — start fresh
+      }
+    }
+  }, [conversationId])
+
+  // Live pre-send context fill estimation
+  useEffect(() => {
+    if (messages.length === 0) {
+      setFillPercent(0)
+      return
+    }
+    setFillPercent(estimateFillPercent(messages, input))
+  }, [input, messages])
+
+  // Reset warning dismissed state when fill drops below threshold
+  useEffect(() => {
+    if (fillPercent < WARN_THRESHOLD) {
+      setWarningDismissed(false)
+    }
+  }, [fillPercent])
 
   const handleSend = async () => {
     if (!input.trim()) return
     setError(null)
 
     const userMessage: Message = { role: 'user', content: input }
-    setMessages((prev) => [...prev, userMessage])
+    const updatedMessages = [...messages, userMessage]
+    setMessages(updatedMessages)
     setInput('')
     setLoading(true)
+
+    // Serialize history to send with request (messages BEFORE this turn)
+    const serializedHistory = serializeHistory(messages)
 
     try {
       const response = await fetch('/api/v1/chat', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: input }),
+        body: JSON.stringify({
+          message: input,
+          conversation_id: conversationId,
+          history: serializedHistory,
+        }),
       })
       const data = await response.json()
-      setMessages((prev) => [
-        ...prev,
-        {
-          role: 'assistant',
-          content: data.text,
-          diagram: data.diagram,
-          iac: data.iac,
-          costs: data.costs,
-        },
-      ])
+
+      // Update conversation_id from server (server may assign new one)
+      if (data.conversation_id && data.conversation_id !== conversationId) {
+        setConversationId(data.conversation_id)
+        localStorage.setItem('aws_advisor_conv_id', data.conversation_id)
+      }
+
+      // D-20: server returns error field on structured output failure
+      if (data.error) {
+        const errorMsg: Message = { role: 'error', content: data.error }
+        const withError = [...updatedMessages, errorMsg]
+        setMessages(withError)
+        toast({
+          title: 'Plan generation failed',
+          description: 'Structured output could not be parsed. See conversation for details.',
+          status: 'error',
+          duration: 5000,
+          isClosable: true,
+          position: 'bottom',
+        })
+        return
+      }
+
+      // Update fill with actual token usage if available
+      if (data.usage?.prompt_tokens) {
+        setFillPercent(Math.min(
+          Math.round((data.usage.prompt_tokens / MODEL_MAX_TOKENS) * 100),
+          100
+        ))
+      }
+
+      const assistantMessage: Message = {
+        role: 'assistant',
+        content: data.text || '',
+        diagram: data.diagram,
+        iac: data.iac,
+        costs: data.costs,
+        services: data.services,
+      }
+      const finalMessages = [...updatedMessages, assistantMessage]
+      setMessages(finalMessages)
+
+      // Persist to localStorage
+      const newConvId = data.conversation_id || conversationId
+      localStorage.setItem('aws_advisor_conv_id', newConvId)
+      localStorage.setItem(
+        `aws_advisor_history_${newConvId}`,
+        JSON.stringify(serializeHistory(finalMessages))
+      )
+
+      // Notify App.tsx of session update
+      onSessionUpdate?.(newConvId, finalMessages, Date.now())
+
     } catch {
       setError('Something went wrong — please try again.')
     } finally {
       setLoading(false)
     }
   }
+
+  const handleCompact = useCallback(async () => {
+    setIsCompacting(true)
+    try {
+      const response = await fetch(`/api/v1/chat/${conversationId}/compact`, {
+        method: 'POST',
+      })
+      if (!response.ok) throw new Error('Compact request failed')
+      setFillPercent(0)
+      setWarningDismissed(false)
+      localStorage.removeItem(`aws_advisor_history_${conversationId}`)
+      toast({
+        title: 'Conversation compacted',
+        description: 'Architecture context preserved.',
+        status: 'success',
+        duration: 3000,
+        isClosable: true,
+        position: 'bottom',
+      })
+    } catch {
+      toast({
+        title: 'Compact failed',
+        description: 'Could not summarize conversation. Please try again.',
+        status: 'error',
+        duration: 4000,
+        isClosable: true,
+        position: 'bottom',
+      })
+    } finally {
+      setIsCompacting(false)
+    }
+  }, [conversationId, toast])
+
+  const handleClear = useCallback(async () => {
+    try {
+      await fetch(`/api/v1/chat/${conversationId}/clear`, { method: 'POST' })
+    } catch {
+      // Non-fatal: clear frontend state regardless
+    }
+    setMessages([])
+    setFillPercent(0)
+    setWarningDismissed(false)
+    setClearConfirming(false)
+    localStorage.removeItem(`aws_advisor_history_${conversationId}`)
+    onSessionUpdate?.(conversationId, [], Date.now())
+  }, [conversationId, onSessionUpdate])
+
+  useImperativeHandle(ref, () => ({
+    compact: handleCompact,
+    clear: handleClear,
+    hasMessages: () => messages.length > 0,
+  }), [handleCompact, handleClear, messages.length])
 
   const showDownloadToast = () => {
     toast({
@@ -308,4 +527,5 @@ export const ChatBox: React.FC = () => {
       </Box>
     </Flex>
   )
-}
+})
+ChatBox.displayName = 'ChatBox'
