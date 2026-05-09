@@ -14,7 +14,6 @@ Locked decisions (CONTEXT.md):
 import uuid
 import shutil
 import os
-import asyncio
 
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, WebSocket, WebSocketDisconnect
 from src.services.ingestion import ingest_document, update_progress, _progress, _ws_connections
@@ -55,19 +54,17 @@ async def upload_knowledge(background_tasks: BackgroundTasks, file: UploadFile =
 async def progress_websocket(websocket: WebSocket, doc_id: str):
     """
     WebSocket endpoint for real-time ingestion progress.
-    Locked in CONTEXT.md: WS /api/v1/knowledge/progress/{doc_id}
-    Emits: {status: str, progress_pct: int, message: str}
-    Closes when status is "indexed" or "error".
+    Registers the connection so update_progress() can push directly — no polling.
+    Stays open until the ingestion background task closes it (indexed/error).
     """
     await websocket.accept()
     _ws_connections[doc_id] = websocket
     try:
-        while True:
-            if doc_id in _progress:
-                await websocket.send_json(_progress[doc_id])
-                if _progress[doc_id].get("status") in ("indexed", "error"):
-                    break
-            await asyncio.sleep(0.5)
+        # Send current state immediately so the client isn't left blank on connect
+        if doc_id in _progress:
+            await websocket.send_json(_progress[doc_id])
+        # Keep connection alive; ingestion task pushes updates via update_progress()
+        await websocket.receive_text()  # blocks until client disconnects
     except WebSocketDisconnect:
         pass
     finally:

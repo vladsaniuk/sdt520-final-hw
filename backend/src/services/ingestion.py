@@ -36,6 +36,9 @@ async def update_progress(doc_id: str, status: str, pct: int, msg: str) -> None:
     if ws:
         try:
             await ws.send_json(_progress[doc_id])
+            if status in ("indexed", "error"):
+                await ws.close()
+                _ws_connections.pop(doc_id, None)
         except Exception:
             _ws_connections.pop(doc_id, None)
 
