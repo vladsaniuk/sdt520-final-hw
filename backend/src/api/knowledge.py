@@ -126,7 +126,7 @@ async def list_documents():
 
 @router.delete("/documents/{document_id}")
 async def delete_document(document_id: str):
-    """Delete a KnowledgeDocument and all its Document_Chunk nodes from Neo4j."""
+    """Delete a KnowledgeDocument and all its Document_Chunk nodes from Neo4j, and the uploaded file from disk."""
     kb = KnowledgeBaseService()
     try:
         with kb.driver.session() as session:
@@ -140,6 +140,15 @@ async def delete_document(document_id: str):
         if deleted == 0:
             from fastapi import HTTPException
             raise HTTPException(status_code=404, detail="Document not found")
+
+        # Remove uploaded file from disk (pattern: {doc_id}_{filename})
+        for fname in os.listdir(UPLOAD_DIR):
+            if fname.startswith(f"{document_id}_"):
+                try:
+                    os.remove(os.path.join(UPLOAD_DIR, fname))
+                except OSError:
+                    pass
+
         return {"deleted": document_id}
     finally:
         kb.close()
