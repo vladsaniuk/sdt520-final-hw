@@ -79,11 +79,10 @@ async def ingest_document(doc_id: str, file_path: str, filename: str) -> None:
 
         await update_progress(doc_id, "embedding", 30, f"Embedding {total} chunks...")
 
-        with kb.driver.session() as session:
-            for i, chunk_text in enumerate(chunks):
-                # embed_query() returns a list of 384 floats (all-MiniLM-L6-v2)
-                embedding = embedder.embed_query(chunk_text)
-
+        def _embed_and_store_chunk(chunk_text: str, chunk_index: int) -> None:
+            """Blocking embed + Neo4j write — called via asyncio.to_thread to free the event loop."""
+            embedding = embedder.embed_query(chunk_text)
+            with kb.driver.session() as session:
                 session.run("""
                     MERGE (d:KnowledgeDocument {id: $doc_id})
                     SET d.filename = $filename
@@ -97,18 +96,22 @@ async def ingest_document(doc_id: str, file_path: str, filename: str) -> None:
                 """,
                     doc_id=doc_id,
                     filename=filename,
-                    chunk_id=f"{doc_id}_{i}",
+                    chunk_id=f"{doc_id}_{chunk_index}",
                     text=chunk_text,
                     embedding=embedding,
-                    index=i,
+                    index=chunk_index,
                 )
 
-                # Report progress every chunk
-                pct = 30 + int((i + 1) / total * 60)  # 30→90% during embedding
-                await update_progress(
-                    doc_id, "embedding", pct,
-                    f"Embedded chunk {i + 1}/{total}"
-                )
+        for i, chunk_text in enumerate(chunks):
+            # Run blocking embed+write in a thread so the event loop can process WS sends
+            await asyncio.to_thread(_embed_and_store_chunk, chunk_text, i)
+
+            # Report progress every chunk
+            pct = 30 + int((i + 1) / total * 60)  # 30→90% during embedding
+            await update_progress(
+                doc_id, "embedding", pct,
+                f"Embedded chunk {i + 1}/{total}"
+            )
 
         await update_progress(doc_id, "indexed", 100, f"Done — {total} chunks indexed")
 

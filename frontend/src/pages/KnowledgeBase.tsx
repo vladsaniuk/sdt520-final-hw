@@ -85,6 +85,8 @@ export const KnowledgeBase: React.FC = () => {
       const response = await fetch('/api/v1/knowledge/upload', { method: 'POST', body: formData })
       if (!response.ok) throw new Error(`Upload failed: ${response.status}`)
       const data = await response.json()
+      setFile(null)
+      if (inputRef.current) inputRef.current.value = ''
       openProgressWebSocket(data.document_id)
     } catch (error) {
       setProgress({ status: 'error', progress_pct: 0, message: `Upload failed: ${String(error)}` })
