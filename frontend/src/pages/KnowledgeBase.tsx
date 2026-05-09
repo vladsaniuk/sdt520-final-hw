@@ -1,4 +1,4 @@
-import React, { useState, useRef } from 'react'
+import React, { useState, useRef, useEffect, useCallback } from 'react'
 import {
   Box,
   VStack,
@@ -20,10 +20,12 @@ interface ProgressState {
   message: string
 }
 
-const MOCK_INDEXED_DOCS = [
-  { name: 'AWS-Well-Architected-Framework.pdf', size: '2.4 MB', chunks: 312, date: '2 days ago' },
-  { name: 'aws-security-whitepaper.pdf', size: '1.1 MB', chunks: 148, date: '1 week ago' },
-]
+interface IndexedDoc {
+  id: string
+  filename: string
+  chunk_count: number
+  indexed_at: string | null
+}
 
 const STAGES = [
   { key: 'upload',    label: 'Upload' },
@@ -48,8 +50,21 @@ export const KnowledgeBase: React.FC = () => {
   const [file, setFile] = useState<File | null>(null)
   const [uploading, setUploading] = useState(false)
   const [progress, setProgress] = useState<ProgressState | null>(null)
+  const [docs, setDocs] = useState<IndexedDoc[]>([])
   const pollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
   const inputRef = useRef<HTMLInputElement>(null)
+
+  const fetchDocs = useCallback(async () => {
+    try {
+      const res = await fetch('/api/v1/knowledge/documents')
+      const data = await res.json()
+      setDocs(data.documents ?? [])
+    } catch {
+      // silently ignore — list stays empty
+    }
+  }, [])
+
+  useEffect(() => { fetchDocs() }, [fetchDocs])
 
   const TERMINAL_STATUSES = new Set(['indexed', 'error', 'unknown'])
 
@@ -83,6 +98,7 @@ export const KnowledgeBase: React.FC = () => {
       setProgress(data)
       if (data.status === 'indexed' || data.status === 'error') {
         receivedTerminal = true
+        if (data.status === 'indexed') fetchDocs()
         ws.close()
       }
     }
@@ -314,20 +330,29 @@ export const KnowledgeBase: React.FC = () => {
                 Indexed Documents
               </Text>
             </HStack>
-            <Badge colorScheme="gray" fontSize="10px" fontStyle="italic">sample data</Badge>
+            <Badge colorScheme="gray" fontSize="10px">{docs.length} document{docs.length !== 1 ? 's' : ''}</Badge>
           </HStack>
-          <VStack divider={<Divider />} spacing={0} align="stretch">
-            {MOCK_INDEXED_DOCS.map((doc) => (
-              <HStack key={doc.name} px={5} py={3} spacing={4}>
-                <Icon as={MdDescription} color="gray.400" boxSize={5} flexShrink={0} />
-                <Box flex={1} minW={0}>
-                  <Text fontSize="sm" color="gray.800" fontWeight="medium" noOfLines={1}>{doc.name}</Text>
-                  <Text fontSize="xs" color="gray.400">{doc.size} · {doc.chunks} chunks · {doc.date}</Text>
-                </Box>
-                <Badge colorScheme="green" flexShrink={0}>Indexed</Badge>
-              </HStack>
-            ))}
-          </VStack>
+          {docs.length === 0 ? (
+            <Box px={5} py={6} textAlign="center">
+              <Text fontSize="sm" color="gray.400">No documents indexed yet</Text>
+            </Box>
+          ) : (
+            <VStack divider={<Divider />} spacing={0} align="stretch">
+              {docs.map((doc) => (
+                <HStack key={doc.id} px={5} py={3} spacing={4}>
+                  <Icon as={MdDescription} color="gray.400" boxSize={5} flexShrink={0} />
+                  <Box flex={1} minW={0}>
+                    <Text fontSize="sm" color="gray.800" fontWeight="medium" noOfLines={1}>{doc.filename}</Text>
+                    <Text fontSize="xs" color="gray.400">
+                      {doc.chunk_count} chunks
+                      {doc.indexed_at ? ` · ${new Date(doc.indexed_at).toLocaleDateString()}` : ''}
+                    </Text>
+                  </Box>
+                  <Badge colorScheme="green" flexShrink={0}>Indexed</Badge>
+                </HStack>
+              ))}
+            </VStack>
+          )}
         </Box>
       </VStack>
     </Box>

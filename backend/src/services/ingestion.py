@@ -118,6 +118,17 @@ async def ingest_document(doc_id: str, file_path: str, filename: str) -> None:
 
         await update_progress(doc_id, "indexed", 100, f"Done — {total} chunks indexed")
 
+        # Stamp indexed_at on the document node now that all chunks are stored
+        from datetime import datetime, timezone
+        indexed_at = datetime.now(timezone.utc).isoformat()
+        def _stamp_indexed_at() -> None:
+            with kb.driver.session() as session:
+                session.run(
+                    "MATCH (d:KnowledgeDocument {id: $doc_id}) SET d.indexed_at = $indexed_at",
+                    doc_id=doc_id, indexed_at=indexed_at,
+                )
+        await asyncio.to_thread(_stamp_indexed_at)
+
     except Exception as e:
         await update_progress(doc_id, "error", 0, f"Ingestion failed: {str(e)}")
         raise

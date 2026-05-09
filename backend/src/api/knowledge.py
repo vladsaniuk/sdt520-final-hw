@@ -4,6 +4,7 @@ Knowledge base API endpoints:
 - POST /upload         — accept file, save to disk, start background ingestion
 - WS   /progress/{id} — stream real-time ingestion progress via WebSocket
 - GET  /status/{id}   — return current ingestion progress (polling fallback)
+- GET  /documents     — list indexed KnowledgeDocument nodes from Neo4j
 
 Locked decisions (CONTEXT.md):
 - WebSocket at WS /api/v1/knowledge/progress/{doc_id}
@@ -14,9 +15,11 @@ Locked decisions (CONTEXT.md):
 import uuid
 import shutil
 import os
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, UploadFile, File, BackgroundTasks, WebSocket, WebSocketDisconnect
 from src.services.ingestion import ingest_document, update_progress, _progress, _ws_connections
+from src.services.knowledge_base import KnowledgeBaseService
 
 router = APIRouter()
 
@@ -87,4 +90,36 @@ async def get_status(document_id: str):
             "message": "Document not found or not yet queued",
         }
     return {"document_id": document_id, **state}
+
+
+@router.get("/documents")
+async def list_documents():
+    """
+    List all indexed KnowledgeDocument nodes from Neo4j.
+    Returns filename, chunk count, and indexed_at timestamp for each document.
+    """
+    kb = KnowledgeBaseService()
+    try:
+        with kb.driver.session() as session:
+            result = session.run("""
+                MATCH (d:KnowledgeDocument)
+                OPTIONAL MATCH (c:Document_Chunk)-[:PART_OF]->(d)
+                RETURN d.id AS id,
+                       d.filename AS filename,
+                       d.indexed_at AS indexed_at,
+                       count(c) AS chunk_count
+                ORDER BY d.indexed_at DESC
+            """)
+            docs = [
+                {
+                    "id": row["id"],
+                    "filename": row["filename"],
+                    "chunk_count": row["chunk_count"],
+                    "indexed_at": row["indexed_at"],
+                }
+                for row in result
+            ]
+        return {"documents": docs}
+    finally:
+        kb.close()
 
