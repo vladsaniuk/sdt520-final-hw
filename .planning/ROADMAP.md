@@ -1,0 +1,95 @@
+# Roadmap: AWS Architecture Advisor
+
+## Overview
+
+A six-phase brownfield completion. The scaffold (FastAPI + React + Neo4j + Docker Compose) exists but is hollow — chat returns mocked data, ingestion is a stub, and the frontend won't compile clean. Every phase is gated by the one before it: fix the broken foundation first, then seed the graph, wire real conversation history, build the ingestion pipeline, deliver the Terraform download, and polish the Docker experience until `docker compose up` produces a working demo.
+
+## Phases
+
+- [ ] **Phase 1: Baseline Fixes** - Repair broken foundation so the app starts, compiles, and makes a real LLM call
+- [ ] **Phase 2: Graph Seeding** - Populate Neo4j with AWS services + Well-Architected knowledge to make GraphRAG meaningful
+- [ ] **Phase 3: Multi-Turn Chat** - Wire conversation history and structured output for real iterative architecture refinement
+- [ ] **Phase 4: Document Ingestion** - Complete the ingestion pipeline so users can ground advice in their own uploaded docs
+- [ ] **Phase 5: Terraform Download** - Deliver the core artifact: a downloadable, valid Terraform config from an approved plan
+- [ ] **Phase 6: Docker Polish** - End-to-end validation that `docker compose up` produces a working demo with zero manual steps
+
+## Phase Details
+
+### Phase 1: Baseline Fixes
+**Goal**: The scaffolding is stable — app starts cleanly, compiles without errors, and makes a real (non-mocked) single-turn LLM call
+**Depends on**: Nothing (first phase)
+**Requirements**: BUG-01, BUG-02, BUG-03, BUG-04, BUG-05, BUG-06, BUG-07
+**Success Criteria** (what must be TRUE):
+  1. `docker compose up` starts all three containers cleanly with no crash-loop or unhandled errors
+  2. Frontend compiles without TypeScript errors and Mermaid diagrams render correctly in the browser
+  3. A chat message reaches the LLM and returns a real architecture response — `recommendation_id` is a UUID, not `"mock-uuid"`
+  4. No SQLAlchemy models, psycopg2-binary, or dead PostgreSQL code remains in the codebase
+**Plans**: TBD
+
+### Phase 2: Graph Seeding
+**Goal**: Neo4j is populated with AWS service knowledge and Well-Architected relationships so advisor recommendations are graph-grounded, not hallucinated
+**Depends on**: Phase 1
+**Requirements**: GRAPH-01, GRAPH-02, GRAPH-03, GRAPH-04
+**Success Criteria** (what must be TRUE):
+  1. On fresh startup, Neo4j contains ≥12 AWS service nodes linked to Well-Architected pillar nodes
+  2. Architecture patterns (microservices, serverless, event-driven, three-tier) exist as graph nodes with component relationships
+  3. The advisor's Cypher query returns ≥5 grounded service recommendations — no empty result sets on cold start
+  4. Schema (vector index + uniqueness constraints) is fully initialized before the seed runs
+**Plans**: TBD
+
+### Phase 3: Multi-Turn Chat
+**Goal**: Users can hold iterative conversations where follow-up messages refine the architecture plan in context — this is the core UX value loop
+**Depends on**: Phase 2
+**Requirements**: CHAT-01, CHAT-02, CHAT-03, CHAT-04, CHAT-05, CHAT-06
+**Success Criteria** (what must be TRUE):
+  1. A follow-up message ("use ECS instead of EKS", "make it cheaper") produces a contextually grounded refinement, not a fresh generic plan
+  2. Each plan response includes all four components: Mermaid architecture diagram, service breakdown, IaC snippet preview, and cost estimate
+  3. LLM calls are non-blocking — multiple simultaneous requests do not stall the event loop or trigger Docker health restarts
+  4. Conversation history persists across multiple turns within a session; the server assigns a `conversation_id` if none is provided
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 4: Document Ingestion
+**Goal**: Users can upload their own best-practice documents and have the advisor ground recommendations in that uploaded knowledge
+**Depends on**: Phase 2
+**Requirements**: INGEST-01, INGEST-02, INGEST-03, INGEST-04, INGEST-05
+**Success Criteria** (what must be TRUE):
+  1. User can upload PDF, markdown, and plain text files via the UI and receive accurate progress status (not a hardcoded stub)
+  2. Uploaded documents are chunked, embedded, and stored as `Document_Chunk` nodes in Neo4j — retrievable via vector search
+  3. Advisor recommendations visibly reference content from user-uploaded documents (GraphRAG is active, not hallucinated)
+  4. Embeddings API decision is resolved and implemented — ingestion does not silently fall back or error on first run
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 5: Terraform Download
+**Goal**: Users can approve a plan and download a valid, deployment-ready Terraform HCL configuration — the core deliverable of the project
+**Depends on**: Phase 3
+**Requirements**: TERRAFORM-01, TERRAFORM-02, TERRAFORM-03, TERRAFORM-04
+**Success Criteria** (what must be TRUE):
+  1. User can trigger plan approval (via UI button) and the app generates a full Terraform HCL config for the recommended architecture
+  2. The generated `.tf` file is downloadable directly from the chat UI
+  3. The generated Terraform config passes structural validation — no syntax errors, valid provider blocks
+  4. Each approved plan produces a unique persisted `.tf` file tied to its `recommendation_id`
+**Plans**: TBD
+**UI hint**: yes
+
+### Phase 6: Docker Polish
+**Goal**: The entire application runs from `docker compose up` with no manual setup steps — demo-ready for zero-configuration evaluation
+**Depends on**: Phase 5
+**Requirements**: DOCKER-01, DOCKER-02, DOCKER-03
+**Success Criteria** (what must be TRUE):
+  1. `docker compose up` + a populated `.env` file produces a fully working demo with zero additional steps
+  2. All required environment variables are documented in `.env.example` with clear descriptions
+  3. The backend `/health` endpoint responds correctly and Docker Compose healthchecks use it to gate service startup
+**Plans**: TBD
+
+## Progress
+
+| Phase | Plans Complete | Status | Completed |
+|-------|----------------|--------|-----------|
+| 1. Baseline Fixes | 0/? | Not started | - |
+| 2. Graph Seeding | 0/? | Not started | - |
+| 3. Multi-Turn Chat | 0/? | Not started | - |
+| 4. Document Ingestion | 0/? | Not started | - |
+| 5. Terraform Download | 0/? | Not started | - |
+| 6. Docker Polish | 0/? | Not started | - |

@@ -61,11 +61,34 @@
 
 ## Traceability
 
-| REQ-ID | Phase |
-|--------|-------|
-| BUG-01 – BUG-07 | Phase 1 |
-| GRAPH-01 – GRAPH-04 | Phase 2 |
-| CHAT-01 – CHAT-06 | Phase 3 |
-| INGEST-01 – INGEST-05 | Phase 4 |
-| TERRAFORM-01 – TERRAFORM-04 | Phase 5 |
-| DOCKER-01 – DOCKER-03 | Phase 6 |
+| Requirement | Phase | Status |
+|-------------|-------|--------|
+| BUG-01 | Phase 1 — Baseline Fixes | Pending |
+| BUG-02 | Phase 1 — Baseline Fixes | Pending |
+| BUG-03 | Phase 1 — Baseline Fixes | Pending |
+| BUG-04 | Phase 1 — Baseline Fixes | Pending |
+| BUG-05 | Phase 1 — Baseline Fixes | Pending |
+| BUG-06 | Phase 1 — Baseline Fixes | Pending |
+| BUG-07 | Phase 1 — Baseline Fixes | Pending |
+| GRAPH-01 | Phase 2 — Graph Seeding | Pending |
+| GRAPH-02 | Phase 2 — Graph Seeding | Pending |
+| GRAPH-03 | Phase 2 — Graph Seeding | Pending |
+| GRAPH-04 | Phase 2 — Graph Seeding | Pending |
+| CHAT-01 | Phase 3 — Multi-Turn Chat | Pending |
+| CHAT-02 | Phase 3 — Multi-Turn Chat | Pending |
+| CHAT-03 | Phase 3 — Multi-Turn Chat | Pending |
+| CHAT-04 | Phase 3 — Multi-Turn Chat | Pending |
+| CHAT-05 | Phase 3 — Multi-Turn Chat | Pending |
+| CHAT-06 | Phase 3 — Multi-Turn Chat | Pending |
+| INGEST-01 | Phase 4 — Document Ingestion | Pending |
+| INGEST-02 | Phase 4 — Document Ingestion | Pending |
+| INGEST-03 | Phase 4 — Document Ingestion | Pending |
+| INGEST-04 | Phase 4 — Document Ingestion | Pending |
+| INGEST-05 | Phase 4 — Document Ingestion | Pending |
+| TERRAFORM-01 | Phase 5 — Terraform Download | Pending |
+| TERRAFORM-02 | Phase 5 — Terraform Download | Pending |
+| TERRAFORM-03 | Phase 5 — Terraform Download | Pending |
+| TERRAFORM-04 | Phase 5 — Terraform Download | Pending |
+| DOCKER-01 | Phase 6 — Docker Polish | Pending |
+| DOCKER-02 | Phase 6 — Docker Polish | Pending |
+| DOCKER-03 | Phase 6 — Docker Polish | Pending |
