@@ -1,14 +1,17 @@
 # backend/src/core/advisor.py
 import os
 import json
+import asyncio
 from langchain_openai import ChatOpenAI
 from langchain_neo4j import Neo4jGraph
+from langchain_core.messages import SystemMessage, HumanMessage, AIMessage, BaseMessage
 from neo4j_graphrag.retrievers import VectorCypherRetriever
 from neo4j_graphrag.embeddings import SentenceTransformerEmbeddings
 from neo4j import GraphDatabase
-from src.core.prompts import ADVISOR_PROMPT
+from src.core.models import ArchitecturePlan, StructuredOutputError
+from src.core.prompts import ADVISOR_PROMPT, COMPACT_PROMPT
 from src.services.knowledge_base import KnowledgeBaseService
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 # Module-level embedder for VectorCypherRetriever (same model as ingestion.py)
 # Lazy initialization — not instantiated at import time to avoid double model load
@@ -83,12 +86,26 @@ class ArchitectureAdvisor:
             refresh_schema=False,
         )
 
-    def get_recommendation(self, requirements: Dict[str, Any]) -> Dict[str, Any]:
+    async def get_recommendation(
+        self,
+        requirements: Dict[str, Any],
+        history: List[BaseMessage],
+    ) -> ArchitecturePlan:
         """
-        Generates an AWS architecture recommendation using GraphRAG.
-        Augments structural graph context with vector-retrieved document chunks.
+        Async architecture recommendation using GraphRAG + LangChain structured output.
+
+        Args:
+            requirements: Extracted requirements dict from the user message.
+            history: Prior conversation turns as LangChain BaseMessage list.
+                     Empty list on first turn.
+
+        Returns:
+            ArchitecturePlan Pydantic object with diagram, services, iac_snippet, cost_estimate.
+
+        Raises:
+            StructuredOutputError: If JSON parse fails after one retry.
         """
-        # 1. Structural graph context — services aligned to Well-Architected pillars
+        # 1. Structural graph context (sync Neo4j query — acceptable for demo)
         context_query = """
             MATCH (s:AWS_Service)-[:ALIGNS_WITH]->(p:WellArchitected_Pillar)
             RETURN s.name as service, s.description as desc, p.name as pillar
@@ -96,29 +113,70 @@ class ArchitectureAdvisor:
         """
         graph_context = self.graph.query(context_query)
 
-        # 2. Vector context — retrieve relevant Document_Chunk nodes from uploaded docs
-        # Returns "" on cold start (no docs uploaded) — advisor proceeds with graph-only context
+        # 2. Vector context — sync blocking call; acceptable for demo (no asyncio event loop stall
+        # because sentence-transformers uses numpy, not IO). Wrap if needed: asyncio.to_thread()
         requirements_text = json.dumps(requirements)
         vector_context = _get_vector_context(requirements_text, top_k=5)
 
-        # 3. Combine context: structural graph + uploaded document excerpts
+        # 3. Combine context
         combined_context = str(graph_context)
         if vector_context:
             combined_context += f"\n\n--- Relevant excerpts from uploaded documents ---\n{vector_context}"
 
-        # 4. Generate advice
-        try:
-            formatted_prompt = ADVISOR_PROMPT.format(
-                context=combined_context,
-                requirements=requirements_text,
-            )
-            response = self.llm.invoke(formatted_prompt)
+        # 4. Build message list: system (fresh context) + history + current user turn
+        # IMPORTANT: ADVISOR_PROMPT is a PromptTemplate — must call .format() before SystemMessage
+        system_content = ADVISOR_PROMPT.format(
+            context=combined_context,
+            requirements=requirements_text,
+        )
+        messages: List[BaseMessage] = [SystemMessage(content=system_content)]
+        messages.extend(history)
+        messages.append(HumanMessage(content=requirements_text))
 
-            return {
-                "advice": response.content,
-                "raw_context": graph_context,
-                "vector_context_used": bool(vector_context),
-            }
-        except Exception as e:
-            print(f"[Advisor] Error during recommendation: {e}")
-            return {"advice": "I encountered an error while generating your recommendation."}
+        # 5. Structured output — json_mode for OpenRouter compatibility
+        structured_llm = self.llm.with_structured_output(
+            ArchitecturePlan,
+            method="json_mode",
+            include_raw=True,
+        )
+
+        # 6. First attempt
+        result = await structured_llm.ainvoke(messages)
+        # result = {"raw": AIMessage, "parsed": ArchitecturePlan | None, "parsing_error": str | None}
+
+        if result["parsing_error"] is not None:
+            print(f"[Advisor] Parse failure on first attempt: {result['parsing_error']}")
+            # Retry once with corrective prompt
+            retry_messages = list(messages)
+            retry_messages.append(AIMessage(content=result["raw"].content or ""))
+            retry_messages.append(HumanMessage(
+                content=(
+                    "Your previous response was not valid JSON matching the required schema. "
+                    "Please respond with ONLY a valid JSON object matching this exact schema:\n"
+                    + json.dumps(ArchitecturePlan.model_json_schema(), indent=2)
+                )
+            ))
+            result = await structured_llm.ainvoke(retry_messages)
+            if result["parsing_error"] is not None:
+                print(f"[Advisor] Parse failure on retry: {result['parsing_error']}")
+                raise StructuredOutputError(
+                    f"Structured output parse failed after retry: {result['parsing_error']}"
+                )
+
+        return result["parsed"]
+
+    async def compact_conversation(self, history: List[BaseMessage]) -> str:
+        """
+        Summarize conversation history into a concise architectural context string.
+        Called by the compact endpoint in routes.py.
+
+        Returns:
+            Summary string to store as a single SystemMessage replacing full history.
+        """
+        summary_messages: List[BaseMessage] = [
+            SystemMessage(content=COMPACT_PROMPT),
+            *history,
+            HumanMessage(content="Summarize the conversation above."),
+        ]
+        result = await self.llm.ainvoke(summary_messages)
+        return result.content
