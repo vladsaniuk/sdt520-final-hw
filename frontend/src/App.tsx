@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef, useCallback } from 'react'
 import {
   Box,
   Flex,
@@ -7,36 +7,95 @@ import {
   Text,
   Button,
   Icon,
+  useToast,
 } from '@chakra-ui/react'
 import { ChatBox } from './components/Chat/ChatBox'
+import type { ChatBoxHandle } from './components/Chat/ChatBox'
 import { KnowledgeBase } from './pages/KnowledgeBase'
-import { MdAdd, MdBolt, MdOutlineArticle } from 'react-icons/md'
+import { MdAdd, MdBolt, MdOutlineArticle, MdCompress, MdClear } from 'react-icons/md'
 
 type Page = 'chat' | 'knowledge'
 
-interface MockConversation {
+interface Session {
   id: string
-  title: string
-  preview: string
-  time: string
+  title: string      // derived from first user message (max 32 chars)
+  turnCount: number  // count of user messages
+  updatedAt: number  // Date.now() at last update
 }
 
-const MOCK_CONVERSATIONS: MockConversation[] = [
-  { id: 'c1', title: 'Serverless e-commerce API', preview: 'Lambda + API Gateway + DynamoDB...', time: '2m ago' },
-  { id: 'c2', title: 'Multi-region DR setup', preview: 'Route 53 failover with RDS Multi-AZ...', time: '1h ago' },
-  { id: 'c3', title: 'ML inference pipeline', preview: 'SageMaker + S3 + Step Functions...', time: 'Yesterday' },
-  { id: 'c4', title: 'Event-driven microservices', preview: 'SNS + SQS + ECS Fargate...', time: '2d ago' },
-]
+function getRelativeTime(ts: number): string {
+  const diffMs = Date.now() - ts
+  const diffMin = Math.floor(diffMs / 60000)
+  if (diffMin < 1) return 'just now'
+  if (diffMin < 60) return `${diffMin}m ago`
+  const diffHr = Math.floor(diffMin / 60)
+  if (diffHr < 24) return `${diffHr}h ago`
+  const diffDay = Math.floor(diffHr / 24)
+  return diffDay === 1 ? 'Yesterday' : `${diffDay}d ago`
+}
 
 function App() {
   const [page, setPage] = useState<Page>('chat')
-  const [activeConv, setActiveConv] = useState('c1')
+  const [sessions, setSessions] = useState<Session[]>([])
+  const [activeConvId, setActiveConvId] = useState<string | undefined>(undefined)
+  const [clearConfirming, setClearConfirming] = useState(false)
+
+  // Ref to ChatBox for Compact/Clear sidebar controls (useImperativeHandle bridge)
+  const chatRef = useRef<ChatBoxHandle>(null)
+  const toast = useToast()
+
+  // Called by ChatBox when messages change (new turn, clear, compact)
+  const handleSessionUpdate = useCallback(
+    (id: string, messages: Array<{ role: string; content: string }>, updatedAt: number) => {
+      setSessions(prev => {
+        const existing = prev.find(s => s.id === id)
+        const firstUserMsg = messages.find(m => m.role === 'user')?.content ?? ''
+        const title = firstUserMsg.slice(0, 32) || 'New conversation'
+        const turnCount = messages.filter(m => m.role === 'user').length
+
+        if (existing) {
+          return prev.map(s =>
+            s.id === id ? { ...s, title, turnCount, updatedAt } : s
+          )
+        }
+        // New session — add to top
+        return [{ id, title, turnCount, updatedAt }, ...prev]
+      })
+      setActiveConvId(id)
+    },
+    []
+  )
+
+  // Sidebar Compact handler — delegates to ChatBox via ref
+  const handleSidebarCompact = useCallback(async () => {
+    if (!chatRef.current?.hasMessages()) return
+    await chatRef.current.compact()
+  }, [])
+
+  // Sidebar Clear handler — shows inline confirmation, then delegates
+  const handleSidebarClearConfirm = useCallback(async () => {
+    await chatRef.current?.clear()
+    setClearConfirming(false)
+  }, [])
+
+  // New conversation — generate new UUID, clear active session
+  const handleNewConversation = useCallback(() => {
+    const newId = crypto.randomUUID()
+    setActiveConvId(newId)
+    setPage('chat')
+    setClearConfirming(false)
+  }, [])
+
+  const hasMessages = chatRef.current?.hasMessages() ?? false
+
+  // Suppress unused toast warning — toast available for future use
+  void toast
 
   return (
     <Flex h="100vh" overflow="hidden" bg="gray.100">
       {/* Sidebar */}
       <Flex as="aside" direction="column" w="260px" flexShrink={0} bg="aws.squid" color="gray.100">
-        {/* Logo */}
+        {/* Logo — unchanged */}
         <HStack px={4} py={4} borderBottom="1px solid" borderColor="aws.squidLight" spacing={3}>
           <Flex w={8} h={8} borderRadius="md" bg="aws.orange" align="center" justify="center" flexShrink={0}>
             <Icon as={MdBolt} color="aws.squid" boxSize={5} />
@@ -47,7 +106,7 @@ function App() {
           </Box>
         </HStack>
 
-        {/* New chat */}
+        {/* New conversation button */}
         <Box px={3} pt={3}>
           <Button
             leftIcon={<Icon as={MdAdd} />}
@@ -58,40 +117,110 @@ function App() {
             color="gray.300"
             borderColor="aws.squidLight"
             _hover={{ bg: 'aws.squidLight', color: 'white' }}
-            onClick={() => setPage('chat')}
+            onClick={handleNewConversation}
           >
             New conversation
           </Button>
         </Box>
 
-        {/* Conversations */}
+        {/* Conversation session list — real sessions state (D-07, UI-SPEC §7) */}
         <VStack flex={1} overflowY="auto" px={2} py={3} spacing={0} align="stretch">
-          <Text px={2} pb={1} fontSize="10px" fontWeight="semibold" textTransform="uppercase" letterSpacing="wider" color="gray.500">
+          <Text
+            px={2} pb={1}
+            fontSize="10px" fontWeight="semibold" textTransform="uppercase"
+            letterSpacing="wider" color="gray.500"
+          >
             Recent
           </Text>
-          {MOCK_CONVERSATIONS.map((c) => (
-            <Box
-              key={c.id}
-              as="button"
-              textAlign="left"
-              px={3} py={2}
-              borderRadius="md"
-              bg={activeConv === c.id ? 'aws.squidLight' : 'transparent'}
-              _hover={{ bg: activeConv === c.id ? 'aws.squidLight' : 'whiteAlpha.100' }}
-              onClick={() => { setActiveConv(c.id); setPage('chat') }}
-              transition="background 0.15s"
-            >
-              <Text fontSize="sm" color="gray.200" fontWeight="medium" noOfLines={1}>{c.title}</Text>
-              <Text fontSize="11px" color="gray.500" noOfLines={1}>{c.preview}</Text>
-              <Text fontSize="10px" color="gray.600" mt="1px">{c.time}</Text>
-            </Box>
-          ))}
-          <Text px={2} pt={3} fontSize="10px" color="gray.600" fontStyle="italic">
-            Full history available in Phase 3
-          </Text>
+
+          {sessions.length === 0 ? (
+            <Text px={2} pt={2} fontSize="11px" color="gray.600" fontStyle="italic">
+              No conversations yet. Send your first message.
+            </Text>
+          ) : (
+            sessions.map(s => (
+              <Box
+                key={s.id}
+                as="button"
+                textAlign="left"
+                px={3} py={2}
+                borderRadius="md"
+                bg={activeConvId === s.id ? 'aws.squidLight' : 'transparent'}
+                _hover={{ bg: activeConvId === s.id ? 'aws.squidLight' : 'whiteAlpha.100' }}
+                onClick={() => { setActiveConvId(s.id); setPage('chat') }}
+                transition="background 0.15s"
+              >
+                <Text fontSize="sm" color="gray.200" fontWeight="medium" noOfLines={1}>
+                  {s.title}
+                </Text>
+                <Text fontSize="11px" color="gray.500" noOfLines={1}>
+                  {s.turnCount} turn{s.turnCount !== 1 ? 's' : ''} · {getRelativeTime(s.updatedAt)}
+                </Text>
+              </Box>
+            ))
+          )}
         </VStack>
 
-        {/* Footer nav */}
+        {/* Sidebar controls row — Compact + Clear (D-07: always visible) */}
+        <HStack
+          px={3} py={2} spacing={2}
+          borderTop="1px solid" borderColor="aws.squidLight"
+        >
+          {/* Compact button */}
+          <Button
+            leftIcon={<Icon as={MdCompress} />}
+            size="sm"
+            variant="ghost"
+            color="gray.300"
+            _hover={{ bg: 'aws.squidLight', color: 'white' }}
+            flex={1}
+            justifyContent="center"
+            fontSize="xs"
+            fontWeight="semibold"
+            isDisabled={!hasMessages}
+            onClick={handleSidebarCompact}
+          >
+            Compact
+          </Button>
+
+          {/* Clear button — with inline confirmation */}
+          {clearConfirming ? (
+            <VStack flex={1} spacing={1} align="stretch">
+              <Text fontSize="xs" color="gray.300" textAlign="center">Clear all messages?</Text>
+              <HStack spacing={1} justify="center">
+                <Button size="xs" colorScheme="red" onClick={handleSidebarClearConfirm}>
+                  Yes, clear
+                </Button>
+                <Button
+                  size="xs"
+                  variant="ghost"
+                  color="gray.400"
+                  onClick={() => setClearConfirming(false)}
+                >
+                  Cancel
+                </Button>
+              </HStack>
+            </VStack>
+          ) : (
+            <Button
+              leftIcon={<Icon as={MdClear} />}
+              size="sm"
+              variant="ghost"
+              color="red.300"
+              _hover={{ bg: 'red.900', color: 'red.200' }}
+              flex={1}
+              justifyContent="center"
+              fontSize="xs"
+              fontWeight="semibold"
+              isDisabled={!hasMessages}
+              onClick={() => setClearConfirming(true)}
+            >
+              Clear
+            </Button>
+          )}
+        </HStack>
+
+        {/* Footer nav — unchanged */}
         <Box borderTop="1px solid" borderColor="aws.squidLight" p={2}>
           <Button
             leftIcon={<Icon as={MdOutlineArticle} />}
@@ -110,9 +239,9 @@ function App() {
         </Box>
       </Flex>
 
-      {/* Main content */}
+      {/* Main content — unchanged structure */}
       <Flex flex={1} direction="column" minW={0} overflow="hidden">
-        {/* Top bar */}
+        {/* Top bar — unchanged */}
         <HStack
           as="header"
           h="48px"
@@ -137,7 +266,15 @@ function App() {
         </HStack>
 
         <Box as="main" flex={1} overflow="hidden">
-          {page === 'chat' ? <ChatBox /> : <KnowledgeBase />}
+          {page === 'chat' ? (
+            <ChatBox
+              ref={chatRef}
+              conversationId={activeConvId}
+              onSessionUpdate={handleSessionUpdate}
+            />
+          ) : (
+            <KnowledgeBase />
+          )}
         </Box>
       </Flex>
     </Flex>
