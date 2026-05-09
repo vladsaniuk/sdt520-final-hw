@@ -61,7 +61,7 @@ export const KnowledgeBase: React.FC = () => {
 
   const notify = (status: 'success' | 'error' | 'warning', title: string, description?: string) =>
     toast({ title, description, status, variant: 'subtle', duration: status === 'error' ? 5000 : 3000,
-      isClosable: true, position: 'bottom-right', containerStyle: { minW: '320px', maxW: '320px' } })
+      isClosable: true, position: 'bottom-right', containerStyle: { minW: '640px', maxW: '640px' } })
 
   const [deletingId, setDeletingId] = useState<string | null>(null)
 
