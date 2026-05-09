@@ -262,22 +262,26 @@ export const KnowledgeBase: React.FC = () => {
                     />
                   </Box>
                 )}
-                {progress.status === 'embedding' && (
-                  <Box>
-                    <HStack justify="space-between" fontSize="xs" color="gray.500" mb={1}>
-                      <Text>{progress.message}</Text>
-                      <Text>{progress.progress_pct}%</Text>
-                    </HStack>
-                    <Progress
-                      value={progress.progress_pct}
-                      colorScheme="orange"
-                      borderRadius="full"
-                      size="sm"
-                      hasStripe
-                      isAnimated
-                    />
-                  </Box>
-                )}
+                {progress.status === 'embedding' && (() => {
+                  // Remap global 30–90% to stage-local 0–100%
+                  const embedPct = Math.round((progress.progress_pct - 30) / 60 * 100)
+                  return (
+                    <Box>
+                      <HStack justify="space-between" fontSize="xs" color="gray.500" mb={1}>
+                        <Text>{progress.message}</Text>
+                        <Text>{embedPct}%</Text>
+                      </HStack>
+                      <Progress
+                        value={embedPct}
+                        colorScheme="orange"
+                        borderRadius="full"
+                        size="sm"
+                        hasStripe
+                        isAnimated
+                      />
+                    </Box>
+                  )
+                })()}
 
                 {/* Status message for fast intermediate stages */}
                 {!['parsing', 'chunking', 'embedding', 'indexed', 'error'].includes(progress.status) && (
