@@ -224,6 +224,21 @@ async def get_conversation_messages(conv_id: str):
     ]
 
 
+@router.get("/conversations/{conv_id}/context")
+async def get_conversation_context(conv_id: str):
+    """Return state + all artifacts so the frontend can restore button/panel state."""
+    state = await asyncio.to_thread(db.get_state, conv_id)
+
+    artifact_types = ["architecture", "costs", "terraform"]
+    artifacts: dict = {}
+    for atype in artifact_types:
+        content = await asyncio.to_thread(db.get_artifact, conv_id, atype)
+        if content is not None:
+            artifacts[atype] = content
+
+    return {"state": state, "artifacts": artifacts}
+
+
 @router.post("/chat/stream")
 async def chat_stream(request: "ChatRequest"):
     """

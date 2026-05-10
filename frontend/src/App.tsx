@@ -99,7 +99,7 @@ function App() {
       .catch(() => {/* backend not yet ready — start fresh */})
   }, [])
 
-  // Reset drawer/artifacts when active conversation changes (sidebar click)
+  // Reset drawer/artifacts when active conversation changes, then restore from backend
   useEffect(() => {
     setUnlockedButtons([])
     setStaleButtons([])
@@ -108,6 +108,39 @@ function App() {
     setLoadingButton(null)
     setLoadingTab(null)
     setDebugEvents([])
+
+    if (!activeConvId) return
+
+    // Restore button/artifact state from backend
+    fetch(`/api/v1/conversations/${activeConvId}/context`)
+      .then(r => r.ok ? r.json() : null)
+      .then((ctx: { state: string; artifacts: Record<string, string> } | null) => {
+        if (!ctx) return
+        const { state, artifacts: arts } = ctx
+
+        // Unlock buttons based on conversation state
+        const unlocked: GenerateType[] = []
+        if (state === 'architecture_ready' || state === 'presenting' || state === 'costs_ready' || state === 'terraform_ready' || state === 'complete') {
+          unlocked.push('architecture')
+        }
+        if (state === 'costs_ready' || state === 'terraform_ready' || state === 'complete') {
+          unlocked.push('costs')
+        }
+        if (state === 'terraform_ready' || state === 'complete') {
+          unlocked.push('terraform')
+        }
+        if (unlocked.length > 0) setUnlockedButtons(unlocked)
+
+        // Restore artifact content
+        const restored: typeof artifacts = {}
+        if (arts.architecture) {
+          try { restored.architecture = JSON.parse(arts.architecture) } catch { restored.architecture = arts.architecture as unknown as ArchitecturePlanData }
+        }
+        if (arts.costs) restored.costs = arts.costs
+        if (arts.terraform) restored.terraform = arts.terraform
+        if (Object.keys(restored).length > 0) setArtifacts(restored)
+      })
+      .catch(() => {})
   }, [activeConvId])
 
   // Fetch debug info whenever active conversation changes
