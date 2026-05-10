@@ -22,7 +22,7 @@ function sanitizeMermaid(definition: string): string {
     .replace(/\[([^\]]*)\]/g, (_match, inner: string) =>
       '[' + inner.replace(/[()]/g, '').trim() + ']'
     )
-    // Remove stray double-quotes inside labels that break the parser
+    // Replace double-quotes inside labels with single-quotes
     .replace(/\[([^\]]*)\]/g, (_match, inner: string) =>
       '[' + inner.replace(/"/g, "'") + ']'
     )
@@ -36,17 +36,25 @@ export const MermaidViewer: React.FC<MermaidViewerProps> = ({ definition }) => {
   const containerRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (containerRef.current && definition) {
-      containerRef.current.removeAttribute('data-processed')
-      // Use textContent (not innerHTML) so Mermaid source is not HTML-parsed.
-      // HTML special chars like --> and > in arrows would otherwise be corrupted.
-      containerRef.current.textContent = sanitizeMermaid(definition)
-      mermaid.run({ nodes: [containerRef.current] }).catch(() => {
-        if (containerRef.current) {
-          containerRef.current.textContent = '⚠ Could not render diagram — invalid Mermaid syntax'
-        }
+    if (!containerRef.current || !definition) return
+
+    const el = containerRef.current
+    const sanitized = sanitizeMermaid(definition)
+
+    // Log so we can inspect the actual definition in devtools
+    console.debug('[MermaidViewer] definition:', sanitized)
+
+    // Use mermaid.render() (not mermaid.run()) for reliable v10 error handling.
+    // render() returns a Promise<{svg}> and rejects on syntax errors.
+    const id = `mermaid-diagram-${Date.now()}`
+    mermaid.render(id, sanitized)
+      .then(({ svg }) => {
+        el.innerHTML = svg
       })
-    }
+      .catch((err: unknown) => {
+        console.error('[MermaidViewer] render failed:', err, '\nDefinition:', sanitized)
+        el.textContent = '⚠ Could not render diagram — invalid Mermaid syntax'
+      })
   }, [definition])
 
   return (
