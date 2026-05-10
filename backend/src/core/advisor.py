@@ -59,14 +59,23 @@ def _get_vector_context(query_text: str, top_k: int = 5) -> dict:
         results = retriever.search(query_text=query_text, top_k=top_k)
         if not results.items:
             return {"text": "", "meta": {"query": query_text, "hits": 0, "sources": []}}
+        print(f"[RAG] first item content[:80]={results.items[0].content[:80]!r} metadata={getattr(results.items[0], 'metadata', None)!r}")
         lines = []
         sources = []
         for item in results.items:
             lines.append(item.content)
-            # item.metadata may contain 'source' from retrieval_query
-            src = getattr(item, "metadata", {})
-            if isinstance(src, dict) and src.get("source"):
-                sources.append(src["source"])
+            # neo4j-graphrag stores non-text return columns in item.metadata
+            meta = getattr(item, "metadata", None) or {}
+            # Try common key names for the source field
+            src = meta.get("source") or meta.get("filename") or meta.get("doc.filename")
+            if not src:
+                # Some versions nest everything under the column alias as-is
+                for v in meta.values():
+                    if isinstance(v, str) and ("." in v or "/" in v):
+                        src = v
+                        break
+            if src:
+                sources.append(src)
         return {
             "text": "\n---\n".join(lines),
             "meta": {"query": query_text, "hits": len(results.items), "sources": list(set(sources))},
@@ -115,15 +124,14 @@ class ArchitectureAdvisor:
             raw_graph = await asyncio.to_thread(self.graph.query, context_query) if self.graph else []
             graph_context = str(raw_graph)
 
-        # 2. Vector context — derive query from last human message in history
-        requirements_text = ""
-        for msg in reversed(history):
-            if isinstance(msg, HumanMessage):
-                requirements_text = msg.content
-                break
+        # 2. Vector context — build query from ALL human messages (full requirements context)
+        human_msgs = [msg.content for msg in history if isinstance(msg, HumanMessage)]
+        requirements_text = human_msgs[-1] if human_msgs else ""
+        # Use concatenation of all user turns as the RAG query for better coverage
+        rag_query = " ".join(human_msgs)[-1000:] if human_msgs else "AWS architecture"
 
         rag_result = await asyncio.to_thread(
-            _get_vector_context, requirements_text or "AWS architecture", 5
+            _get_vector_context, rag_query, 5
         )
         vector_context = rag_result["text"]
         rag_meta = rag_result["meta"]
