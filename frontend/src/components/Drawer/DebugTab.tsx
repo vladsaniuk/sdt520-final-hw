@@ -282,7 +282,7 @@ export const DebugTab: React.FC<DebugTabProps> = ({ events, info }) => {
                       <Text fontSize="10px" color="gray.600" flexShrink={0} pt="1px">
                         [{extractTime(item.tokens[0].timestamp)}]
                       </Text>
-                      <Badge colorScheme="gray" fontSize="11px" flexShrink={0} mt="1px" textTransform="lowercase">
+                      <Badge colorScheme="gray" fontSize="11px" flexShrink={0} mt="1px" textTransform="lowercase" fontFamily="sans-serif">
                         tokens ×{item.tokens.length}
                       </Badge>
                       <Text fontSize="11px" color="gray.500" noOfLines={1} flex={1}>
@@ -326,7 +326,7 @@ export const DebugTab: React.FC<DebugTabProps> = ({ events, info }) => {
                       [{extractTime(evt.timestamp)}]
                     </Text>
                     <Badge
-                      colorScheme={typeBadgeColor(evt.type)}
+                      colorScheme={typeBadgeColor(evt.type)} fontFamily="sans-serif"
                       fontSize="11px"
                       flexShrink={0}
                       mt="1px"
