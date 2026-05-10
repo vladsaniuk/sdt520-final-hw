@@ -22,6 +22,11 @@ router = APIRouter()
 extractor = RequirementExtractor()
 advisor = ArchitectureAdvisor()
 
+
+@router.get("/health")
+async def health():
+    return {"status": "ok"}
+
 # In-memory cache of generated Terraform HCL keyed by recommendation_id.
 _terraform_cache: Dict[str, str] = {}
 

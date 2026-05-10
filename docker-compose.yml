@@ -32,6 +32,12 @@ services:
     depends_on:
       neo4j:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:8000/api/v1/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     volumes:
       - ./backend:/app
       - sqlite_data:/app/data
@@ -43,7 +49,7 @@ services:
       - "3000:5173"
     depends_on:
       backend:
-        condition: service_started
+        condition: service_healthy
     restart: on-failure
     volumes:
       - ./frontend:/app
