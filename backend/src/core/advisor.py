@@ -78,13 +78,16 @@ class ArchitectureAdvisor:
             openai_api_key=os.getenv("LLM_API_KEY"),
             openai_api_base="https://openrouter.ai/api/v1"
         )
-        self.graph = Neo4jGraph(
-            url=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
-            username=os.getenv("NEO4J_USER", "neo4j"),
-            password=os.getenv("NEO4J_PASSWORD", "password"),
-            enhanced_schema=False,
-            refresh_schema=False,
-        )
+        try:
+            self.graph = Neo4jGraph(
+                url=os.getenv("NEO4J_URI", "bolt://localhost:7687"),
+                username=os.getenv("NEO4J_USER", "neo4j"),
+                password=os.getenv("NEO4J_PASSWORD", "password"),
+                enhanced_schema=False,
+                refresh_schema=False,
+            )
+        except Exception:
+            self.graph = None
 
     async def build_advisor_messages(
         self,
@@ -104,7 +107,7 @@ class ArchitectureAdvisor:
                 RETURN s.name as service, s.description as desc, p.name as pillar
                 LIMIT 20
             """
-            raw_graph = await asyncio.to_thread(self.graph.query, context_query)
+            raw_graph = await asyncio.to_thread(self.graph.query, context_query) if self.graph else []
             graph_context = str(raw_graph)
 
         # 2. Vector context — derive query from last human message in history
@@ -162,7 +165,7 @@ class ArchitectureAdvisor:
             RETURN s.name as service, s.description as desc, p.name as pillar
             LIMIT 20
         """
-        graph_context = self.graph.query(context_query)
+        graph_context = self.graph.query(context_query) if self.graph else []
 
         # 2. Vector context — sync blocking call; acceptable for demo (no asyncio event loop stall
         # because sentence-transformers uses numpy, not IO). Wrap if needed: asyncio.to_thread()
