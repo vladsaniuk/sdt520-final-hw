@@ -263,7 +263,12 @@ function App() {
                 setArtifacts(prev => ({ ...prev, terraform: accumulatedText }))
               }
               // Architecture tokens don't update incrementally (JSON parse needed at end)
-
+            } else if (event.type === 'debug' || event.type === 'rag') {
+              setDebugEvents(prev => [...prev, {
+                timestamp: new Date().toISOString(),
+                type: String(event.type),
+                payload: event,
+              }])
             } else if (event.type === 'done') {
               const payload = event.payload as Record<string, unknown>
               const readyFor = event.ready_for as string[] | undefined

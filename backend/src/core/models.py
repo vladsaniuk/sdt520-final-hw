@@ -1,5 +1,5 @@
-from pydantic import BaseModel, Field
-from typing import List
+from pydantic import BaseModel, Field, model_validator
+from typing import List, Optional, Any
 
 
 class ServiceDetail(BaseModel):
@@ -20,8 +20,28 @@ class ServiceCost(BaseModel):
 
 class CostEstimate(BaseModel):
     """Total cost estimate with per-service breakdown."""
-    total: float = Field(description="Total estimated monthly cost in USD")
-    breakdown: List[ServiceCost] = Field(description="Per-service cost breakdown")
+    total: float = Field(default=0.0, description="Total estimated monthly cost in USD")
+    breakdown: List[ServiceCost] = Field(default_factory=list, description="Per-service cost breakdown")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _normalise(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        # LLM sometimes returns estimated_monthly_cost instead of total
+        if "total" not in data:
+            for alt in ("estimated_monthly_cost", "monthly_cost", "cost"):
+                if alt in data:
+                    data["total"] = data.pop(alt)
+                    break
+        # LLM sometimes returns breakdown as a plain dict {service: cost}
+        bd = data.get("breakdown")
+        if isinstance(bd, dict):
+            data["breakdown"] = [
+                {"service": k, "cost": float(v), "is_calculated": False}
+                for k, v in bd.items()
+            ]
+        return data
 
 
 class ArchitecturePlan(BaseModel):
