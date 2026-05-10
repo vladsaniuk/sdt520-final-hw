@@ -1,3 +1,4 @@
+import re as _re
 from pydantic import BaseModel, Field, model_validator
 from typing import List, Optional, Any
 
@@ -16,6 +17,21 @@ class ServiceCost(BaseModel):
     is_calculated: bool = Field(
         description="True if based on AWS Pricing API, False if LLM estimate"
     )
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_cost(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        raw = data.get("cost")
+        if isinstance(raw, str):
+            # Strip currency symbols, words, whitespace — keep digits and dot
+            numeric = _re.sub(r"[^\d.]", "", raw.split()[0] if raw.strip() else "0")
+            try:
+                data["cost"] = float(numeric) if numeric else 0.0
+            except ValueError:
+                data["cost"] = 0.0
+        return data
 
 
 class CostEstimate(BaseModel):

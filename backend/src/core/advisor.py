@@ -48,6 +48,22 @@ def _get_retriever() -> VectorCypherRetriever:
     return _retriever
 
 
+import re as _re
+
+
+def _parse_record_string(content: str) -> tuple[str, str | None]:
+    """
+    neo4j-graphrag serializes full Record objects into item.content when the
+    retrieval_query returns multiple columns. Parse text and source out of it.
+    Example: "<Record text='hello' source='foo.pdf' score=0.9>"
+    """
+    text_m = _re.search(r"text='(.*?)'(?:\s+source=|>)", content, _re.DOTALL)
+    text = text_m.group(1) if text_m else content
+    src_m = _re.search(r"source='([^']+)'", content)
+    source = src_m.group(1) if src_m else None
+    return text, source
+
+
 def _get_vector_context(query_text: str, top_k: int = 5) -> dict:
     """
     Query Document_Chunk nodes via vector similarity search.
@@ -59,21 +75,18 @@ def _get_vector_context(query_text: str, top_k: int = 5) -> dict:
         results = retriever.search(query_text=query_text, top_k=top_k)
         if not results.items:
             return {"text": "", "meta": {"query": query_text, "hits": 0, "sources": []}}
-        print(f"[RAG] first item content[:80]={results.items[0].content[:80]!r} metadata={getattr(results.items[0], 'metadata', None)!r}")
         lines = []
         sources = []
         for item in results.items:
-            lines.append(item.content)
-            # neo4j-graphrag stores non-text return columns in item.metadata
-            meta = getattr(item, "metadata", None) or {}
-            # Try common key names for the source field
-            src = meta.get("source") or meta.get("filename") or meta.get("doc.filename")
-            if not src:
-                # Some versions nest everything under the column alias as-is
-                for v in meta.values():
-                    if isinstance(v, str) and ("." in v or "/" in v):
-                        src = v
-                        break
+            raw = item.content or ""
+            # neo4j-graphrag may serialize the full Record into content
+            if raw.startswith("<Record "):
+                text, src = _parse_record_string(raw)
+            else:
+                text = raw
+                meta = getattr(item, "metadata", None) or {}
+                src = meta.get("source") or meta.get("filename")
+            lines.append(text)
             if src:
                 sources.append(src)
         return {
