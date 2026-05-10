@@ -41,6 +41,16 @@ Thumbs.db
 *.tfvars
 .terraform.lock.hcl
 
-# Neo4j runtime data (Docker volume mount)
-data/
-logs/
+# Neo4j runtime data (Docker volume mount) — ignore contents, keep directory stubs
+data/neo4j/*
+!data/neo4j/logs/
+!data/neo4j/import/
+!data/neo4j/plugins/
+data/neo4j/logs/*
+!data/neo4j/logs/.gitkeep
+data/neo4j/import/*
+!data/neo4j/import/.gitkeep
+data/neo4j/plugins/*
+!data/neo4j/plugins/.gitkeep
+logs/*
+!logs/.gitkeep
