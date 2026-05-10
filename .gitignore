@@ -54,3 +54,7 @@ data/neo4j/plugins/*
 !data/neo4j/plugins/.gitkeep
 logs/*
 !logs/.gitkeep
+
+# Backend runtime data
+backend/data/uploads/
+backend/data/*.db
