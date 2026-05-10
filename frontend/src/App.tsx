@@ -54,7 +54,9 @@ function App() {
   const [unlockedButtons, setUnlockedButtons] = useState<GenerateType[]>([])
   const [staleButtons, setStaleButtons] = useState<GenerateType[]>([])
   const [loadingButton, setLoadingButton] = useState<GenerateType | null>(null)
-  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [drawerOpen, setDrawerOpen] = useState(() => {
+    return localStorage.getItem('debugDrawerOpen') === 'true'
+  })
   const [loadingTab, setLoadingTab] = useState<string | null>(null)
   const [artifacts, setArtifacts] = useState<{
     architecture?: ArchitecturePlanData | null
@@ -140,6 +142,7 @@ function App() {
         if (Object.keys(restored).length > 0) {
           setArtifacts(restored)
           setDrawerOpen(true)
+          localStorage.setItem('debugDrawerOpen', 'true')
         }
       })
       .catch(() => {})
@@ -218,6 +221,7 @@ function App() {
       setLoadingButton(type)
       setLoadingTab(type)
       setDrawerOpen(true)
+      localStorage.setItem('debugDrawerOpen', 'true')
 
       try {
         const response = await fetch(`/api/v1/generate/${type}`, {
@@ -614,7 +618,7 @@ function App() {
             unlockedTabs={unlockedButtons}
             artifacts={artifacts}
             loadingTab={loadingTab}
-            onClose={() => setDrawerOpen(false)}
+            onClose={() => { setDrawerOpen(false); localStorage.setItem('debugDrawerOpen', 'false') }}
             debugEvents={debugEvents}
             debugInfo={debugInfo}
           />
