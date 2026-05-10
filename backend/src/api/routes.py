@@ -710,10 +710,16 @@ async def debug_info():
     """Return system snapshot for the debug panel."""
     neo4j_connected = advisor.graph is not None
     neo4j_node_count = 0
+    neo4j_chunk_count = 0
+    neo4j_doc_count = 0
     if neo4j_connected:
         try:
             result = await asyncio.to_thread(advisor.graph.query, "MATCH (n) RETURN count(n) as count")
             neo4j_node_count = result[0]["count"] if result else 0
+            chunks = await asyncio.to_thread(advisor.graph.query, "MATCH (n:Chunk) RETURN count(n) as count")
+            neo4j_chunk_count = chunks[0]["count"] if chunks else 0
+            docs = await asyncio.to_thread(advisor.graph.query, "MATCH (n:KnowledgeDocument) RETURN count(n) as count")
+            neo4j_doc_count = docs[0]["count"] if docs else 0
         except Exception:
             neo4j_connected = False
 
@@ -729,6 +735,15 @@ async def debug_info():
             "connected": neo4j_connected,
             "uri": os.getenv("NEO4J_URI", "bolt://neo4j:7687"),
             "node_count": neo4j_node_count,
+        },
+        "rag": {
+            "retriever": "VectorCypherRetriever",
+            "embedding_model": "all-MiniLM-L6-v2",
+            "vector_index": "aws_document_chunks",
+            "top_k": 5,
+            "retrieval_query": "MATCH (node)-[:PART_OF]->(doc:KnowledgeDocument) RETURN node.text AS text, doc.filename AS source, score",
+            "knowledge_documents": neo4j_doc_count,
+            "indexed_chunks": neo4j_chunk_count,
         },
         "sqlite": {
             "path": "/app/data/advisor.db",

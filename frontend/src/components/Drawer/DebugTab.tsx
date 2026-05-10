@@ -23,6 +23,15 @@ export interface DebugEvent {
 export interface DebugInfo {
   model: { name: string; provider: string; base_url: string }
   neo4j: { connected: boolean; uri: string; node_count: number }
+  rag: {
+    retriever: string
+    embedding_model: string
+    vector_index: string
+    top_k: number
+    retrieval_query: string
+    knowledge_documents: number
+    indexed_chunks: number
+  }
   sqlite: { path: string; conversation_count: number }
   prompts: { gather: string; followup?: string; advisor: string | Record<string, any>; terraform: string }
   env: { llm_api_key_set: boolean; neo4j_uri: string }
@@ -141,6 +150,35 @@ export const DebugTab: React.FC<DebugTabProps> = ({ events, info }) => {
                 </>
               )}
             </HStack>
+            {info.rag && (
+              <>
+                <HStack spacing={2} fontSize="xs">
+                  <Text color="gray.400" minW="16">RAG</Text>
+                  <Text color="gray.200">{info.rag.retriever}</Text>
+                </HStack>
+                <HStack spacing={2} fontSize="xs">
+                  <Text color="gray.400" minW="16">Embedder</Text>
+                  <Text color="gray.200" flex={1} noOfLines={1}>{info.rag.embedding_model}</Text>
+                </HStack>
+                <HStack spacing={2} fontSize="xs">
+                  <Text color="gray.400" minW="16">Index</Text>
+                  <Text color="gray.200" flex={1}>{info.rag.vector_index}</Text>
+                  <Text color="gray.500">top_k={info.rag.top_k}</Text>
+                </HStack>
+                <HStack spacing={2} fontSize="xs">
+                  <Text color="gray.400" minW="16">Docs</Text>
+                  <Text color="gray.200">{info.rag.knowledge_documents} documents</Text>
+                  <Text color="gray.500">·</Text>
+                  <Text color="gray.400">{info.rag.indexed_chunks} chunks</Text>
+                </HStack>
+                <Box fontSize="xs">
+                  <Text color="gray.400" mb="2px">Retrieval query</Text>
+                  <Code fontSize="10px" color="gray.400" bg="gray.900" p={1} display="block" whiteSpace="pre-wrap" borderRadius="sm">
+                    {info.rag.retrieval_query}
+                  </Code>
+                </Box>
+              </>
+            )}
             <HStack spacing={2} fontSize="xs">
               <Text color="gray.400" minW="16">SQLite</Text>
               <Text color="gray.200" noOfLines={1}>{info.sqlite.path}</Text>
