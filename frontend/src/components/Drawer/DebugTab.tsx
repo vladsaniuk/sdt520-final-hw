@@ -288,15 +288,37 @@ export const DebugTab: React.FC<DebugTabProps> = ({ events, info }) => {
                     </HStack>
                     {isExpanded && (
                       <Box px={2} pb={2} bg="gray.800">
+                        {/* Assembled text */}
+                        <Text fontSize="10px" color="gray.500" mb={1} fontFamily="sans-serif">Assembled text</Text>
                         <Code
                           display="block"
                           whiteSpace="pre-wrap"
                           fontSize="10px"
                           color="gray.300"
-                          bg="transparent"
+                          bg="gray.900"
+                          p={2}
+                          borderRadius="md"
+                          mb={2}
                         >
                           {item.text}
                         </Code>
+                        {/* Individual token events */}
+                        <Text fontSize="10px" color="gray.500" mb={1} fontFamily="sans-serif">Individual tokens</Text>
+                        <VStack spacing={0} align="stretch">
+                          {item.tokens.map((tok, ti) => (
+                            <HStack key={ti} px={1} py="2px" spacing={2} _hover={{ bg: 'gray.750' }} align="flex-start">
+                              <Text fontSize="10px" color="gray.600" flexShrink={0} fontFamily="monospace">
+                                [{extractTime(tok.timestamp)}]
+                              </Text>
+                              <Badge colorScheme="gray" fontSize="11px" fontFamily="sans-serif" textTransform="lowercase" flexShrink={0}>
+                                token
+                              </Badge>
+                              <Text fontSize="10px" color="gray.400" fontFamily="monospace" flex={1}>
+                                {(tok.payload.content as string) ?? ''}
+                              </Text>
+                            </HStack>
+                          ))}
+                        </VStack>
                       </Box>
                     )}
                   </Box>
