@@ -17,6 +17,7 @@ import { ActionBar } from './components/ActionBar'
 import type { GenerateType } from './components/ActionBar'
 import { ArtifactDrawer } from './components/ArtifactDrawer'
 import type { ArchitecturePlanData } from './components/ArtifactDrawer'
+import type { DebugEvent, DebugInfo } from './components/Drawer/DebugTab'
 
 type Page = 'chat' | 'knowledge'
 
@@ -61,6 +62,9 @@ function App() {
     terraform?: string | null
   }>({})
 
+  // Debug state
+  const [debugEvents, setDebugEvents] = useState<DebugEvent[]>([])
+  const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null)
   // Load conversations from backend DB on mount for sidebar restore
   useEffect(() => {
     fetch('/api/v1/conversations')
@@ -94,6 +98,15 @@ function App() {
     setDrawerOpen(false)
     setLoadingButton(null)
     setLoadingTab(null)
+    setDebugEvents([])
+  }, [activeConvId])
+
+  // Fetch debug info whenever active conversation changes
+  useEffect(() => {
+    fetch('/api/v1/debug/info')
+      .then(r => r.json())
+      .then((data: DebugInfo) => setDebugInfo(data))
+      .catch(() => {})
   }, [activeConvId])
 
   // Called by ChatBox when messages change (new turn, clear, compact)
@@ -482,6 +495,7 @@ function App() {
                   onSessionUpdate={handleSessionUpdate}
                   onUnlock={handleUnlock}
                   onStale={handleStale}
+                  onDebugEvent={(event) => setDebugEvents(prev => [...prev, event])}
                 />
               ) : (
                 <KnowledgeBase />
@@ -496,6 +510,8 @@ function App() {
             artifacts={artifacts}
             loadingTab={loadingTab}
             onClose={() => setDrawerOpen(false)}
+            debugEvents={debugEvents}
+            debugInfo={debugInfo}
           />
         </Flex>
       </Flex>

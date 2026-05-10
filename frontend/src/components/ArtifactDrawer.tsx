@@ -11,10 +11,12 @@ import {
   IconButton,
   Tag,
 } from '@chakra-ui/react'
-import { MdClose, MdContentCopy, MdDownload, MdBolt, MdAttachMoney, MdCode } from 'react-icons/md'
+import { MdClose, MdContentCopy, MdDownload, MdBolt, MdAttachMoney, MdCode, MdBugReport } from 'react-icons/md'
 import { MermaidViewer } from './Diagram/MermaidViewer'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { vscDarkPlus } from 'react-syntax-highlighter/dist/esm/styles/prism'
+import { DebugTab } from './Drawer/DebugTab'
+import type { DebugEvent, DebugInfo } from './Drawer/DebugTab'
 
 interface ServiceItem {
   name: string
@@ -51,11 +53,14 @@ export interface ArtifactDrawerProps {
   }
   loadingTab: string | null
   onClose: () => void
+  debugEvents: DebugEvent[]
+  debugInfo: DebugInfo | null
 }
 
-type TabType = 'architecture' | 'costs' | 'terraform'
+type TabType = 'debug' | 'architecture' | 'costs' | 'terraform'
 
-const TAB_DEFS: Array<{ id: TabType; label: string; icon: React.ElementType }> = [
+const TAB_DEFS: Array<{ id: TabType; label: string; icon: React.ElementType; alwaysUnlocked?: boolean }> = [
+  { id: 'debug', label: 'Debug', icon: MdBugReport, alwaysUnlocked: true },
   { id: 'architecture', label: 'Architecture', icon: MdBolt },
   { id: 'costs', label: 'Costs', icon: MdAttachMoney },
   { id: 'terraform', label: 'Terraform', icon: MdCode },
@@ -124,22 +129,59 @@ export const ArtifactDrawer: React.FC<ArtifactDrawerProps> = ({
   artifacts,
   loadingTab,
   onClose,
+  debugEvents,
+  debugInfo,
 }) => {
-  const [activeTab, setActiveTab] = useState<TabType>('architecture')
+  const [activeTab, setActiveTab] = useState<TabType>('debug')
   const [tfCopied, setTfCopied] = useState(false)
   const streamRef = useRef<HTMLDivElement>(null)
+
+  // Notification dot tracking — keyed by tab id
+  const [unseenCount, setUnseenCount] = useState<Record<string, number>>({
+    debug: 0,
+    architecture: 0,
+    costs: 0,
+    terraform: 0,
+  })
+
+  // Track previous artifact values to detect new arrivals
+  const prevArtifacts = useRef(artifacts)
+  const prevDebugCount = useRef(0)
+
+  useEffect(() => {
+    // Architecture arrived
+    if (artifacts.architecture && !prevArtifacts.current.architecture && activeTab !== 'architecture') {
+      setUnseenCount(prev => ({ ...prev, architecture: 1 }))
+    }
+    // Costs arrived
+    if (artifacts.costs && !prevArtifacts.current.costs && activeTab !== 'costs') {
+      setUnseenCount(prev => ({ ...prev, costs: 1 }))
+    }
+    // Terraform arrived
+    if (artifacts.terraform && !prevArtifacts.current.terraform && activeTab !== 'terraform') {
+      setUnseenCount(prev => ({ ...prev, terraform: 1 }))
+    }
+    prevArtifacts.current = artifacts
+  }, [artifacts, activeTab])
+
+  // Debug events count
+  useEffect(() => {
+    const newCount = debugEvents.length - prevDebugCount.current
+    if (newCount > 0 && activeTab !== 'debug') {
+      setUnseenCount(prev => ({ ...prev, debug: (prev.debug ?? 0) + newCount }))
+    }
+    prevDebugCount.current = debugEvents.length
+  }, [debugEvents.length, activeTab])
+
+  const handleTabClick = (id: TabType) => {
+    setActiveTab(id)
+    setUnseenCount(prev => ({ ...prev, [id]: 0 }))
+  }
 
   // Auto-scroll streaming content
   useEffect(() => {
     streamRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [artifacts])
-
-  // Auto-select the newly loaded tab
-  useEffect(() => {
-    if (loadingTab) {
-      setActiveTab(loadingTab as TabType)
-    }
-  }, [loadingTab])
 
   const handleTfCopy = () => {
     if (!artifacts.terraform) return
@@ -228,15 +270,16 @@ export const ArtifactDrawer: React.FC<ArtifactDrawerProps> = ({
           spacing={0}
           flexShrink={0}
         >
-          {TAB_DEFS.map(({ id, label, icon }) => {
+          {TAB_DEFS.map(({ id, label, icon, alwaysUnlocked }) => {
             const isActive = activeTab === id
-            const isUnlocked = unlockedTabs.includes(id)
+            const isUnlocked = alwaysUnlocked || unlockedTabs.includes(id)
             const isLoading = loadingTab === id
+            const dotCount = unseenCount[id] ?? 0
 
             return (
               <button
                 key={id}
-                onClick={() => isUnlocked && setActiveTab(id)}
+                onClick={() => isUnlocked && handleTabClick(id)}
                 disabled={!isUnlocked}
                 style={{
                   padding: '8px 14px',
@@ -255,6 +298,7 @@ export const ArtifactDrawer: React.FC<ArtifactDrawerProps> = ({
                   alignItems: 'center',
                   gap: '4px',
                   transition: 'color 0.15s',
+                  position: 'relative',
                 }}
               >
                 {isLoading ? (
@@ -263,15 +307,42 @@ export const ArtifactDrawer: React.FC<ArtifactDrawerProps> = ({
                   <Icon as={icon} boxSize={3} />
                 )}
                 {label}
+                {dotCount > 0 && !isActive && (
+                  <span style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    minWidth: '16px',
+                    height: '16px',
+                    padding: '0 4px',
+                    borderRadius: '8px',
+                    background: id === 'debug' ? '#ED8936' : '#E53E3E',
+                    color: 'white',
+                    fontSize: '9px',
+                    fontWeight: 700,
+                    lineHeight: 1,
+                    marginLeft: '2px',
+                  }}>
+                    {id === 'debug' && dotCount > 1 ? `+${dotCount}` : '●'}
+                  </span>
+                )}
               </button>
             )
           })}
         </HStack>
 
         {/* Tab content */}
-        <Box flex={1} overflowY="auto" p={4}>
+        <Box flex={1} overflowY="auto" p={0} display="flex" flexDirection="column">
+          {/* Debug Tab */}
+          {activeTab === 'debug' && (
+            <Box flex={1} overflow="hidden" display="flex" flexDirection="column">
+              <DebugTab events={debugEvents} info={debugInfo} />
+            </Box>
+          )}
+
           {/* Architecture Tab */}
           {activeTab === 'architecture' && (
+            <Box p={4}>
             <VStack spacing={4} align="stretch">
               {loadingTab === 'architecture' && !artifacts.architecture && (
                 <Flex align="center" justify="center" py={12} gap={3}>
@@ -355,11 +426,12 @@ export const ArtifactDrawer: React.FC<ArtifactDrawerProps> = ({
                 </Flex>
               )}
             </VStack>
+            </Box>
           )}
 
           {/* Costs Tab */}
           {activeTab === 'costs' && (
-            <Box>
+            <Box p={4}>
               {loadingTab === 'costs' && !artifacts.costs && (
                 <Flex align="center" justify="center" py={12} gap={3}>
                   <Spinner size="md" color="green.400" />
@@ -389,7 +461,7 @@ export const ArtifactDrawer: React.FC<ArtifactDrawerProps> = ({
 
           {/* Terraform Tab */}
           {activeTab === 'terraform' && (
-            <Box>
+            <Box p={4}>
               {loadingTab === 'terraform' && !artifacts.terraform && (
                 <Flex align="center" justify="center" py={12} gap={3}>
                   <Spinner size="md" color="blue.400" />

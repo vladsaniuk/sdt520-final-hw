@@ -18,6 +18,7 @@ import {
   Tag,
 } from '@chakra-ui/react'
 import { MdSend, MdBolt, MdWarning, MdCompress, MdClear } from 'react-icons/md'
+import type { DebugEvent } from '../Drawer/DebugTab'
 
 interface Message {
   role: 'user' | 'assistant' | 'error' | 'approval'
@@ -46,6 +47,8 @@ interface ChatBoxProps {
   onUnlock?: (types: string[]) => void
   /** Called when backend signals existing artifacts are stale */
   onStale?: (types: string[]) => void
+  /** Called for every SSE event (and user messages) for the debug log */
+  onDebugEvent?: (event: DebugEvent) => void
 }
 
 const MODEL_MAX_TOKENS = 128_000
@@ -87,7 +90,7 @@ const PROMPT_CHIPS = [
 ]
 
 export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
-  ({ conversationId: externalConvId, onSessionUpdate, onUnlock, onStale }, ref) => {
+  ({ conversationId: externalConvId, onSessionUpdate, onUnlock, onStale, onDebugEvent }, ref) => {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
@@ -162,6 +165,13 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
     setInput('')
     setLoading(true)
 
+    // Emit user message to debug log
+    onDebugEvent?.({
+      timestamp: new Date().toISOString(),
+      type: 'user',
+      payload: { content: sentInput },
+    })
+
     // Placeholder assistant bubble that gets filled token by token
     const assistantPlaceholder: Message = { role: 'assistant', content: '' }
     setMessages(prev => [...prev, assistantPlaceholder])
@@ -204,6 +214,13 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
           } catch {
             continue
           }
+
+          // Forward every SSE event to debug log
+          onDebugEvent?.({
+            timestamp: new Date().toISOString(),
+            type: String(event.type ?? 'unknown'),
+            payload: event,
+          })
 
           if (event.type === 'token') {
             streamingContent += (event.content as string)
