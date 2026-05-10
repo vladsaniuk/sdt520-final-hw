@@ -86,6 +86,57 @@ class ArchitectureAdvisor:
             refresh_schema=False,
         )
 
+    async def build_advisor_messages(
+        self,
+        history: List[BaseMessage],
+        graph_context: str = "",
+    ) -> List[BaseMessage]:
+        """
+        Assemble the full message list for architecture generation WITHOUT calling the LLM.
+        Fetches graph + vector context internally when graph_context is empty.
+
+        Returns a list of BaseMessage ready for llm.astream() or llm.ainvoke().
+        """
+        # 1. Graph context
+        if not graph_context:
+            context_query = """
+                MATCH (s:AWS_Service)-[:ALIGNS_WITH]->(p:WellArchitected_Pillar)
+                RETURN s.name as service, s.description as desc, p.name as pillar
+                LIMIT 20
+            """
+            raw_graph = await asyncio.to_thread(self.graph.query, context_query)
+            graph_context = str(raw_graph)
+
+        # 2. Vector context — derive query from last human message in history
+        requirements_text = ""
+        for msg in reversed(history):
+            if isinstance(msg, HumanMessage):
+                requirements_text = msg.content
+                break
+
+        vector_context = await asyncio.to_thread(
+            _get_vector_context, requirements_text or "AWS architecture", 5
+        )
+
+        combined_context = graph_context
+        if vector_context:
+            combined_context += f"\n\n--- Relevant excerpts from uploaded documents ---\n{vector_context}"
+
+        # 3. Build system message from ADVISOR_PROMPT template
+        system_content = ADVISOR_PROMPT.format(
+            context=combined_context,
+            requirements=requirements_text or "AWS production architecture",
+        )
+        # Enforce JSON-only output (no markdown fences) for streaming parse
+        system_content += (
+            "\n\nCRITICAL: Your ENTIRE response must be valid JSON only. "
+            "Start directly with { and end with }. No markdown fences, no text before or after."
+        )
+
+        messages: List[BaseMessage] = [SystemMessage(content=system_content)]
+        messages.extend(history)
+        return messages
+
     async def get_recommendation(
         self,
         requirements: Dict[str, Any],

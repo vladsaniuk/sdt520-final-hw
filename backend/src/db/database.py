@@ -1,6 +1,5 @@
 import sqlite3
 import time
-import uuid
 from pathlib import Path
 from typing import List, Optional
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
@@ -37,6 +36,18 @@ def init_db() -> None:
             )
         """)
         conn.execute("CREATE INDEX IF NOT EXISTS idx_messages_conv ON messages(conversation_id)")
+        conn.execute("""
+            CREATE TABLE IF NOT EXISTS artifacts (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                conversation_id TEXT NOT NULL,
+                artifact_type TEXT NOT NULL,
+                content TEXT NOT NULL,
+                created_at INTEGER NOT NULL
+            )
+        """)
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_artifacts_conv ON artifacts(conversation_id)"
+        )
     conn.close()
 
 
@@ -146,3 +157,32 @@ def list_conversations() -> List[dict]:
         })
     conn.close()
     return result
+
+
+def save_artifact(conversation_id: str, artifact_type: str, content: str) -> None:
+    """Save or replace an artifact for a conversation (upsert by conv+type)."""
+    ensure_conversation(conversation_id)
+    now = int(time.time() * 1000)
+    conn = _get_conn()
+    with conn:
+        # Remove any existing artifact of this type for this conversation first
+        conn.execute(
+            "DELETE FROM artifacts WHERE conversation_id = ? AND artifact_type = ?",
+            (conversation_id, artifact_type),
+        )
+        conn.execute(
+            "INSERT INTO artifacts (conversation_id, artifact_type, content, created_at) VALUES (?, ?, ?, ?)",
+            (conversation_id, artifact_type, content, now),
+        )
+    conn.close()
+
+
+def get_artifact(conversation_id: str, artifact_type: str) -> Optional[str]:
+    """Return artifact content string, or None if not found."""
+    conn = _get_conn()
+    row = conn.execute(
+        "SELECT content FROM artifacts WHERE conversation_id = ? AND artifact_type = ? ORDER BY id DESC LIMIT 1",
+        (conversation_id, artifact_type),
+    ).fetchone()
+    conn.close()
+    return row["content"] if row else None

@@ -1,6 +1,7 @@
 import uuid
 import json
 import os
+import re
 import tempfile
 import shutil
 import asyncio
@@ -24,7 +25,10 @@ advisor = ArchitectureAdvisor()
 # In-memory cache of generated Terraform HCL keyed by recommendation_id.
 _terraform_cache: Dict[str, str] = {}
 
-READY_MARKER = "[READY_TO_ARCHITECT]"
+# Regex to detect the ready-for-architecture JSON signal from GATHER_PROMPT
+READY_SIGNAL_RE = re.compile(
+    r'\{\s*"ready_for"\s*:\s*\[\s*"architecture"\s*\]\s*\}'
+)
 
 
 def _deserialize_history(raw: List[dict]) -> List[BaseMessage]:
@@ -213,12 +217,13 @@ async def list_conversations():
 async def chat_stream(request: "ChatRequest"):
     """
     SSE streaming chat endpoint. State-machine-driven:
-    - 'gathering': Ask clarifying questions using GATHER_PROMPT. Detect [READY_TO_ARCHITECT]
-      to auto-transition to 'presenting' and stream the architecture.
-    - 'presenting' / 'complete': Stream the full architecture response.
+    - 'gathering': Ask clarifying questions using GATHER_PROMPT.
+      Detect {"ready_for":["architecture"]} signal to unlock architecture generation.
+    - 'presenting' / 'architecture_ready' / 'complete': Conversational follow-up.
 
     SSE events:
       data: {"type":"token","content":"..."}\n\n
+      data: {"type":"status","content":"..."}\n\n
       data: {"type":"done","payload":{...}}\n\n
       data: {"type":"error","message":"..."}\n\n
     """
@@ -230,6 +235,12 @@ async def chat_stream(request: "ChatRequest"):
             state = await asyncio.to_thread(db.get_state, conv_id)
             history = await asyncio.to_thread(db.get_history, conv_id)
             llm = _make_llm()
+
+            # Detect if existing architecture artifact will become stale on this new message
+            existing_arch = await asyncio.to_thread(db.get_artifact, conv_id, "architecture")
+            stale_fields: List[str] = []
+            if existing_arch:
+                stale_fields = ["architecture", "costs", "terraform"]
 
             if state == "gathering":
                 # Build gathering messages: system prompt + history + new user message
@@ -248,42 +259,20 @@ async def chat_stream(request: "ChatRequest"):
                 # Persist this turn
                 await asyncio.to_thread(db.save_message, conv_id, "human", request.message)
 
-                if READY_MARKER in full_response:
-                    # Strip marker from stored text
-                    clean_response = full_response.replace(READY_MARKER, "").strip()
+                if READY_SIGNAL_RE.search(full_response):
+                    # Strip signal from stored text
+                    clean_response = READY_SIGNAL_RE.sub("", full_response).strip()
                     await asyncio.to_thread(db.save_message, conv_id, "ai", clean_response)
-                    await asyncio.to_thread(db.set_state, conv_id, "presenting")
+                    await asyncio.to_thread(db.set_state, conv_id, "architecture_ready")
 
-                    # Now generate the architecture
-                    yield f"data: {json.dumps({'type': 'status', 'content': 'Designing your architecture…'})}\n\n"
-                    updated_history = await asyncio.to_thread(db.get_history, conv_id)
-                    requirements = await asyncio.to_thread(extractor.extract, request.message)
-                    try:
-                        plan: ArchitecturePlan = await advisor.get_recommendation(requirements, updated_history)
-                    except StructuredOutputError as e:
-                        yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-                        return
-
-                    rec_id = str(uuid.uuid4())
-                    await asyncio.to_thread(db.save_message, conv_id, "ai", plan.model_dump_json())
-                    await asyncio.to_thread(db.set_state, conv_id, "presenting")
-
-                    payload = {
-                        "phase": "presenting",
-                        "recommendation_id": rec_id,
+                    payload: Dict = {
+                        "phase": "gathering",
                         "conversation_id": conv_id,
-                        "text": plan.summary,
-                        "diagram": plan.diagram,
-                        "iac": [{"type": "terraform", "content": plan.iac_snippet}],
-                        "costs": {
-                            "total": plan.cost_estimate.total,
-                            "breakdown": [b.model_dump() for b in plan.cost_estimate.breakdown],
-                        },
-                        "services": [
-                            {"name": s.name, "description": s.description, "rationale": s.rationale}
-                            for s in plan.services
-                        ],
+                        "text": clean_response,
+                        "ready_for": ["architecture"],
                     }
+                    if stale_fields:
+                        payload["stale"] = stale_fields
                     yield f"data: {json.dumps({'type': 'done', 'payload': payload})}\n\n"
                 else:
                     await asyncio.to_thread(db.save_message, conv_id, "ai", full_response)
@@ -292,45 +281,47 @@ async def chat_stream(request: "ChatRequest"):
                         "conversation_id": conv_id,
                         "text": full_response,
                     }
+                    if stale_fields:
+                        payload["stale"] = stale_fields
                     yield f"data: {json.dumps({'type': 'done', 'payload': payload})}\n\n"
 
             else:
-                # presenting or complete — generate full architecture
-                history_msgs: List[BaseMessage] = [
+                # presenting / architecture_ready / complete — conversational follow-up
+                # Use GATHER_PROMPT so AI continues in advisory mode (no inline arch generation)
+                conv_messages: List[BaseMessage] = [
+                    SystemMessage(content=GATHER_PROMPT),
                     *history,
                     HumanMessage(content=request.message),
                 ]
-                requirements = await asyncio.to_thread(extractor.extract, request.message)
                 await asyncio.to_thread(db.save_message, conv_id, "human", request.message)
 
-                # Stream a status token so the frontend shows activity
-                yield f"data: {json.dumps({'type': 'status', 'content': 'Updating architecture…'})}\n\n"
+                full_response = ""
+                async for chunk in llm.astream(conv_messages):
+                    token = chunk.content or ""
+                    if token:
+                        full_response += token
+                        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
 
-                try:
-                    plan = await advisor.get_recommendation(requirements, history)
-                except StructuredOutputError as e:
-                    yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
-                    return
+                # If ready signal appears in a follow-up, handle it too
+                if READY_SIGNAL_RE.search(full_response):
+                    clean_response = READY_SIGNAL_RE.sub("", full_response).strip()
+                    await asyncio.to_thread(db.save_message, conv_id, "ai", clean_response)
+                    payload = {
+                        "phase": "gathering",
+                        "conversation_id": conv_id,
+                        "text": clean_response,
+                        "ready_for": ["architecture"],
+                    }
+                else:
+                    await asyncio.to_thread(db.save_message, conv_id, "ai", full_response)
+                    payload = {
+                        "phase": "gathering",
+                        "conversation_id": conv_id,
+                        "text": full_response,
+                    }
 
-                rec_id = str(uuid.uuid4())
-                await asyncio.to_thread(db.save_message, conv_id, "ai", plan.model_dump_json())
-
-                payload = {
-                    "phase": "presenting",
-                    "recommendation_id": rec_id,
-                    "conversation_id": conv_id,
-                    "text": plan.summary,
-                    "diagram": plan.diagram,
-                    "iac": [{"type": "terraform", "content": plan.iac_snippet}],
-                    "costs": {
-                        "total": plan.cost_estimate.total,
-                        "breakdown": [b.model_dump() for b in plan.cost_estimate.breakdown],
-                    },
-                    "services": [
-                        {"name": s.name, "description": s.description, "rationale": s.rationale}
-                        for s in plan.services
-                    ],
-                }
+                if stale_fields:
+                    payload["stale"] = stale_fields
                 yield f"data: {json.dumps({'type': 'done', 'payload': payload})}\n\n"
 
         except Exception as e:
@@ -457,4 +448,188 @@ async def approve_plan(conversation_id: str, request: ApproveRequest):
         hcl=hcl,
         valid=valid,
         validation_errors=errors,
+    )
+
+
+# ---------------------------------------------------------------------------
+# /generate/* endpoints — on-demand SSE streaming generators
+# ---------------------------------------------------------------------------
+
+class GenerateRequest(BaseModel):
+    conversation_id: str
+
+
+def _strip_json_fences(text: str) -> str:
+    """Strip markdown code fences from LLM JSON output."""
+    text = text.strip()
+    if text.startswith("```json"):
+        text = text[7:]
+        if "```" in text:
+            text = text[:text.rindex("```")]
+    elif text.startswith("```"):
+        text = text[3:]
+        if "```" in text:
+            text = text[:text.rindex("```")]
+    return text.strip()
+
+
+@router.post("/generate/architecture")
+async def generate_architecture(request: GenerateRequest):
+    """
+    Stream architecture generation for a conversation.
+    SSE events: token → done (with ArchitecturePlan payload + ready_for: ["costs"])
+    """
+    conv_id = request.conversation_id
+
+    async def stream():
+        try:
+            history = await asyncio.to_thread(db.get_history, conv_id)
+            if not history:
+                yield f"data: {json.dumps({'type': 'error', 'message': 'Conversation not found or empty'})}\n\n"
+                return
+
+            messages_for_arch = await advisor.build_advisor_messages(history)
+            llm = _make_llm()
+
+            arch_text = ""
+            async for chunk in llm.astream(messages_for_arch):
+                token = chunk.content or ""
+                if token:
+                    arch_text += token
+                    yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+            # Parse accumulated JSON into ArchitecturePlan
+            clean_text = _strip_json_fences(arch_text)
+            try:
+                plan = ArchitecturePlan.model_validate_json(clean_text)
+            except Exception as parse_err:
+                print(f"[generate/architecture] Parse error: {parse_err}\nRaw: {clean_text[:500]}")
+                yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to parse architecture plan: {parse_err}'})}\n\n"
+                return
+
+            # Persist artifact + update state
+            await asyncio.to_thread(db.save_artifact, conv_id, "architecture", plan.model_dump_json())
+            await asyncio.to_thread(db.set_state, conv_id, "architecture_ready")
+
+            payload = {
+                "summary": plan.summary,
+                "diagram": plan.diagram,
+                "services": [s.model_dump() for s in plan.services],
+                "iac_snippet": plan.iac_snippet,
+                "cost_estimate": plan.cost_estimate.model_dump(),
+            }
+            yield f"data: {json.dumps({'type': 'done', 'payload': payload, 'ready_for': ['costs']})}\n\n"
+
+        except Exception as e:
+            print(f"[generate/architecture] Unhandled error for {conv_id}: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Architecture generation failed'})}\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/generate/costs")
+async def generate_costs(request: GenerateRequest):
+    """
+    Stream cost estimate for a conversation's architecture.
+    SSE events: token → done (ready_for: ["terraform"])
+    """
+    conv_id = request.conversation_id
+
+    async def stream():
+        try:
+            history = await asyncio.to_thread(db.get_history, conv_id)
+            arch_artifact = await asyncio.to_thread(db.get_artifact, conv_id, "architecture")
+
+            cost_system = (
+                "You are an AWS cost estimation expert. Based on the conversation and the architecture plan below, "
+                "provide a detailed cost breakdown in Markdown format. Include:\n"
+                "- Per-service monthly cost estimates with rationale\n"
+                "- Total estimated monthly cost\n"
+                "- Cost optimization recommendations\n"
+                "- Assumptions made in the estimate\n\n"
+                "Be specific with numbers (e.g. '$45/month for NAT Gateway based on 100GB data transfer').\n"
+                "Mark estimates as approximate — not sourced from AWS Pricing API.\n\n"
+            )
+            if arch_artifact:
+                cost_system += f"Architecture Plan:\n{arch_artifact}"
+
+            messages: List[BaseMessage] = [
+                SystemMessage(content=cost_system),
+                *history,
+                HumanMessage(content="Generate a detailed cost estimate for this architecture."),
+            ]
+
+            llm = _make_llm()
+            cost_text = ""
+            async for chunk in llm.astream(messages):
+                token = chunk.content or ""
+                if token:
+                    cost_text += token
+                    yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+            await asyncio.to_thread(db.save_artifact, conv_id, "costs", cost_text)
+            await asyncio.to_thread(db.set_state, conv_id, "costs_ready")
+
+            yield f"data: {json.dumps({'type': 'done', 'payload': {'content': cost_text}, 'ready_for': ['terraform']})}\n\n"
+
+        except Exception as e:
+            print(f"[generate/costs] Unhandled error for {conv_id}: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Cost generation failed'})}\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
+
+
+@router.post("/generate/terraform")
+async def generate_terraform(request: GenerateRequest):
+    """
+    Stream full Terraform HCL for a conversation's architecture.
+    SSE events: token → done (with download hint)
+    """
+    conv_id = request.conversation_id
+
+    async def stream():
+        try:
+            history = await asyncio.to_thread(db.get_history, conv_id)
+            arch_artifact = await asyncio.to_thread(db.get_artifact, conv_id, "architecture")
+
+            system_content = TERRAFORM_FULL_PROMPT
+            if arch_artifact:
+                system_content += f"\n\nArchitecture Plan:\n{arch_artifact}"
+
+            messages: List[BaseMessage] = [
+                SystemMessage(content=system_content),
+                *history[-10:],
+                HumanMessage(content="Generate the complete Terraform configuration now."),
+            ]
+
+            llm = _make_llm()
+            hcl_text = ""
+            async for chunk in llm.astream(messages):
+                token = chunk.content or ""
+                if token:
+                    hcl_text += token
+                    yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+            clean_hcl = _strip_json_fences(hcl_text)
+            await asyncio.to_thread(db.save_artifact, conv_id, "terraform", clean_hcl)
+            await asyncio.to_thread(db.set_state, conv_id, "terraform_ready")
+
+            yield f"data: {json.dumps({'type': 'done', 'payload': {'content': clean_hcl, 'filename': 'main.tf'}})}\n\n"
+
+        except Exception as e:
+            print(f"[generate/terraform] Unhandled error for {conv_id}: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Terraform generation failed'})}\n\n"
+
+    return StreamingResponse(
+        stream(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
