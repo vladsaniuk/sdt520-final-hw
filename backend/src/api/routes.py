@@ -2,9 +2,11 @@ import uuid
 import json
 import os
 import re
+import logging
 import tempfile
 import shutil
 import asyncio
+from datetime import datetime, timezone
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import StreamingResponse
@@ -21,6 +23,26 @@ from src.db import database as db
 router = APIRouter()
 extractor = RequirementExtractor()
 advisor = ArchitectureAdvisor()
+
+# JSON-lines debug logger — writes to /logs/debug.jsonl (git-ignored)
+_LOG_PATH = Path("/logs/debug.jsonl")
+_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+_debug_log = logging.getLogger("debug_events")
+_debug_log.setLevel(logging.DEBUG)
+_fh = logging.FileHandler(_LOG_PATH)
+_fh.setFormatter(logging.Formatter("%(message)s"))
+_debug_log.addHandler(_fh)
+_debug_log.propagate = False
+
+
+def _log_event(payload: dict) -> str:
+    """Serialize payload to SSE data string and log it as a JSON line."""
+    payload["_ts"] = datetime.now(timezone.utc).isoformat()
+    line = json.dumps(payload)
+    _debug_log.debug(line)
+    # Remove _ts from the SSE wire format so the client sees the original shape
+    payload.pop("_ts")
+    return f"data: {json.dumps(payload)}\n\n"
 
 
 @router.get("/health")
@@ -292,15 +314,15 @@ async def chat_stream(request: "ChatRequest"):
                     "event": "llm_call_start",
                     "messages": [{"role": m.type, "content": m.content[:2000]} for m in gather_messages],
                 }
-                yield f"data: {json.dumps(debug_payload)}\n\n"
+                yield _log_event(debug_payload)
                 full_response = ""
                 async for chunk in llm.astream(gather_messages):
                     token = chunk.content or ""
                     if token:
                         full_response += token
-                        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+                        yield _log_event({'type': 'token', 'content': token})
 
-                yield f"data: {json.dumps({'type': 'debug', 'event': 'llm_call_done', 'token_count': len(full_response.split())})}\n\n"
+                yield _log_event({'type': 'debug', 'event': 'llm_call_done', 'token_count': len(full_response.split())})
 
                 # Persist this turn
                 await asyncio.to_thread(db.save_message, conv_id, "human", request.message)
@@ -319,7 +341,7 @@ async def chat_stream(request: "ChatRequest"):
                     }
                     if stale_fields:
                         payload["stale"] = stale_fields
-                    yield f"data: {json.dumps({'type': 'done', 'payload': payload})}\n\n"
+                    yield _log_event({'type': 'done', 'payload': payload})
                 else:
                     await asyncio.to_thread(db.save_message, conv_id, "ai", full_response)
                     payload = {
@@ -329,7 +351,7 @@ async def chat_stream(request: "ChatRequest"):
                     }
                     if stale_fields:
                         payload["stale"] = stale_fields
-                    yield f"data: {json.dumps({'type': 'done', 'payload': payload})}\n\n"
+                    yield _log_event({'type': 'done', 'payload': payload})
 
             else:
                 # presenting / architecture_ready / complete — conversational follow-up
@@ -346,15 +368,15 @@ async def chat_stream(request: "ChatRequest"):
                     "event": "llm_call_start",
                     "messages": [{"role": m.type, "content": m.content[:2000]} for m in conv_messages],
                 }
-                yield f"data: {json.dumps(debug_payload_conv)}\n\n"
+                yield _log_event(debug_payload_conv)
                 full_response = ""
                 async for chunk in llm.astream(conv_messages):
                     token = chunk.content or ""
                     if token:
                         full_response += token
-                        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+                        yield _log_event({'type': 'token', 'content': token})
 
-                yield f"data: {json.dumps({'type': 'debug', 'event': 'llm_call_done', 'token_count': len(full_response.split())})}\n\n"
+                yield _log_event({'type': 'debug', 'event': 'llm_call_done', 'token_count': len(full_response.split())})
 
                 # If ready signal appears in a follow-up, handle it too
                 if READY_SIGNAL_RE.search(full_response):
@@ -376,12 +398,12 @@ async def chat_stream(request: "ChatRequest"):
 
                 if stale_fields:
                     payload["stale"] = stale_fields
-                yield f"data: {json.dumps({'type': 'done', 'payload': payload})}\n\n"
+                yield _log_event({'type': 'done', 'payload': payload})
 
         except Exception as e:
             print(f"[Stream] Unhandled error for {conv_id}: {e}")
-            yield f"data: {json.dumps({'type': 'debug', 'event': 'error', 'detail': str(e)})}\n\n"
-            yield f"data: {json.dumps({'type': 'error', 'message': 'Internal server error'})}\n\n"
+            yield _log_event({'type': 'debug', 'event': 'error', 'detail': str(e)})
+            yield _log_event({'type': 'error', 'message': 'Internal server error'})
 
     return StreamingResponse(
         generate(),
@@ -540,28 +562,28 @@ async def generate_architecture(request: GenerateRequest):
         try:
             history = await asyncio.to_thread(db.get_history, conv_id)
             if not history:
-                yield f"data: {json.dumps({'type': 'error', 'message': 'Conversation not found or empty'})}\n\n"
+                yield _log_event({'type': 'error', 'message': 'Conversation not found or empty'})
                 return
 
             messages_for_arch, rag_meta = await advisor.build_advisor_messages(history)
             llm = _make_llm()
 
-            yield f"data: {json.dumps({'type': 'rag', 'event': 'retrieval_done', **rag_meta})}\n\n"
+            yield _log_event({'type': 'rag', 'event': 'retrieval_done', **rag_meta})
 
             debug_payload = {
                 "type": "debug",
                 "event": "llm_call_start",
                 "messages": [{"role": m.type, "content": m.content[:2000]} for m in messages_for_arch],
             }
-            yield f"data: {json.dumps(debug_payload)}\n\n"
+            yield _log_event(debug_payload)
             arch_text = ""
             async for chunk in llm.astream(messages_for_arch):
                 token = chunk.content or ""
                 if token:
                     arch_text += token
-                    yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+                    yield _log_event({'type': 'token', 'content': token})
 
-            yield f"data: {json.dumps({'type': 'debug', 'event': 'llm_call_done', 'token_count': len(arch_text.split())})}\n\n"
+            yield _log_event({'type': 'debug', 'event': 'llm_call_done', 'token_count': len(arch_text.split())})
 
             # Parse accumulated JSON into ArchitecturePlan
             clean_text = _strip_json_fences(arch_text)
@@ -569,7 +591,7 @@ async def generate_architecture(request: GenerateRequest):
                 plan = ArchitecturePlan.model_validate_json(clean_text)
             except Exception as parse_err:
                 print(f"[generate/architecture] Parse error: {parse_err}\nRaw: {clean_text[:500]}")
-                yield f"data: {json.dumps({'type': 'error', 'message': f'Failed to parse architecture plan: {parse_err}'})}\n\n"
+                yield _log_event({'type': 'error', 'message': f'Failed to parse architecture plan: {parse_err}'})
                 return
 
             # Persist artifact + update state
@@ -583,12 +605,12 @@ async def generate_architecture(request: GenerateRequest):
                 "iac_snippet": plan.iac_snippet,
                 "cost_estimate": plan.cost_estimate.model_dump(),
             }
-            yield f"data: {json.dumps({'type': 'done', 'payload': payload, 'ready_for': ['costs']})}\n\n"
+            yield _log_event({'type': 'done', 'payload': payload, 'ready_for': ['costs']})
 
         except Exception as e:
             print(f"[generate/architecture] Unhandled error for {conv_id}: {e}")
-            yield f"data: {json.dumps({'type': 'debug', 'event': 'error', 'detail': str(e)})}\n\n"
-            yield f"data: {json.dumps({'type': 'error', 'message': 'Architecture generation failed'})}\n\n"
+            yield _log_event({'type': 'debug', 'event': 'error', 'detail': str(e)})
+            yield _log_event({'type': 'error', 'message': 'Architecture generation failed'})
 
     return StreamingResponse(
         stream(),
@@ -635,25 +657,25 @@ async def generate_costs(request: GenerateRequest):
                 "event": "llm_call_start",
                 "messages": [{"role": m.type, "content": m.content[:2000]} for m in messages],
             }
-            yield f"data: {json.dumps(debug_payload)}\n\n"
+            yield _log_event(debug_payload)
             cost_text = ""
             async for chunk in llm.astream(messages):
                 token = chunk.content or ""
                 if token:
                     cost_text += token
-                    yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+                    yield _log_event({'type': 'token', 'content': token})
 
-            yield f"data: {json.dumps({'type': 'debug', 'event': 'llm_call_done', 'token_count': len(cost_text.split())})}\n\n"
+            yield _log_event({'type': 'debug', 'event': 'llm_call_done', 'token_count': len(cost_text.split())})
 
             await asyncio.to_thread(db.save_artifact, conv_id, "costs", cost_text)
             await asyncio.to_thread(db.set_state, conv_id, "costs_ready")
 
-            yield f"data: {json.dumps({'type': 'done', 'payload': {'content': cost_text}, 'ready_for': ['terraform']})}\n\n"
+            yield _log_event({'type': 'done', 'payload': {'content': cost_text}, 'ready_for': ['terraform']})
 
         except Exception as e:
             print(f"[generate/costs] Unhandled error for {conv_id}: {e}")
-            yield f"data: {json.dumps({'type': 'debug', 'event': 'error', 'detail': str(e)})}\n\n"
-            yield f"data: {json.dumps({'type': 'error', 'message': 'Cost generation failed'})}\n\n"
+            yield _log_event({'type': 'debug', 'event': 'error', 'detail': str(e)})
+            yield _log_event({'type': 'error', 'message': 'Cost generation failed'})
 
     return StreamingResponse(
         stream(),
@@ -691,26 +713,26 @@ async def generate_terraform(request: GenerateRequest):
                 "event": "llm_call_start",
                 "messages": [{"role": m.type, "content": m.content[:2000]} for m in messages],
             }
-            yield f"data: {json.dumps(debug_payload)}\n\n"
+            yield _log_event(debug_payload)
             hcl_text = ""
             async for chunk in llm.astream(messages):
                 token = chunk.content or ""
                 if token:
                     hcl_text += token
-                    yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+                    yield _log_event({'type': 'token', 'content': token})
 
-            yield f"data: {json.dumps({'type': 'debug', 'event': 'llm_call_done', 'token_count': len(hcl_text.split())})}\n\n"
+            yield _log_event({'type': 'debug', 'event': 'llm_call_done', 'token_count': len(hcl_text.split())})
 
             clean_hcl = _strip_json_fences(hcl_text)
             await asyncio.to_thread(db.save_artifact, conv_id, "terraform", clean_hcl)
             await asyncio.to_thread(db.set_state, conv_id, "terraform_ready")
 
-            yield f"data: {json.dumps({'type': 'done', 'payload': {'content': clean_hcl, 'filename': 'main.tf'}})}\n\n"
+            yield _log_event({'type': 'done', 'payload': {'content': clean_hcl, 'filename': 'main.tf'}})
 
         except Exception as e:
             print(f"[generate/terraform] Unhandled error for {conv_id}: {e}")
-            yield f"data: {json.dumps({'type': 'debug', 'event': 'error', 'detail': str(e)})}\n\n"
-            yield f"data: {json.dumps({'type': 'error', 'message': 'Terraform generation failed'})}\n\n"
+            yield _log_event({'type': 'debug', 'event': 'error', 'detail': str(e)})
+            yield _log_event({'type': 'error', 'message': 'Terraform generation failed'})
 
     return StreamingResponse(
         stream(),

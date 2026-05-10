@@ -41,6 +41,7 @@ services:
     volumes:
       - ./backend:/app
       - sqlite_data:/app/data
+      - ./logs:/logs
 
   frontend:
     build: ./frontend

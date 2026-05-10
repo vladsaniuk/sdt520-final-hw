@@ -43,3 +43,4 @@ Thumbs.db
 
 # Neo4j runtime data (Docker volume mount)
 data/
+logs/
