@@ -42,7 +42,9 @@ services:
     ports:
       - "3000:5173"
     depends_on:
-      - backend
+      backend:
+        condition: service_started
+    restart: on-failure
     volumes:
       - ./frontend:/app
       - /app/node_modules
