@@ -6,11 +6,13 @@ from src.api.routes import router as chat_router
 from src.api.knowledge import router as knowledge_router
 from src.api.seed import router as seed_router
 from src.services.knowledge_base import KnowledgeBaseService
+from src.db.database import init_db
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    """Startup: initialize Neo4j schema. Shutdown: close driver."""
+    """Startup: initialize SQLite DB + Neo4j schema. Shutdown: close driver."""
+    init_db()
     kb_service = KnowledgeBaseService()
     try:
         kb_service.initialize_schema()

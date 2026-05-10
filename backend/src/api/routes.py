@@ -6,6 +6,7 @@ import shutil
 import asyncio
 from pathlib import Path
 from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
@@ -13,20 +14,17 @@ from langchain_openai import ChatOpenAI
 from src.core.extractor import RequirementExtractor
 from src.core.advisor import ArchitectureAdvisor
 from src.core.models import ArchitecturePlan, ServiceDetail, StructuredOutputError
-from src.core.prompts import ADVISOR_PROMPT, COMPACT_PROMPT, TERRAFORM_FULL_PROMPT
+from src.core.prompts import ADVISOR_PROMPT, COMPACT_PROMPT, TERRAFORM_FULL_PROMPT, GATHER_PROMPT
+from src.db import database as db
 
 router = APIRouter()
 extractor = RequirementExtractor()
 advisor = ArchitectureAdvisor()
 
-# In-memory conversation history keyed by conversation_id.
-# Lost on container restart — v2 persistence is deferred (per D-13).
-# Thread-safe for demo: FastAPI single-threaded asyncio event loop, no concurrent writes.
-_conversation_history: Dict[str, List[BaseMessage]] = {}
-
 # In-memory cache of generated Terraform HCL keyed by recommendation_id.
-# Same pattern as _conversation_history — lost on container restart (acceptable for demo, per D-03).
 _terraform_cache: Dict[str, str] = {}
+
+READY_MARKER = "[READY_TO_ARCHITECT]"
 
 
 def _deserialize_history(raw: List[dict]) -> List[BaseMessage]:
@@ -40,6 +38,14 @@ def _deserialize_history(raw: List[dict]) -> List[BaseMessage]:
         elif role == "ai":
             result.append(AIMessage(content=content))
     return result
+
+
+def _make_llm() -> ChatOpenAI:
+    return ChatOpenAI(
+        model="openai/gpt-4o",
+        openai_api_key=os.getenv("LLM_API_KEY"),
+        openai_api_base="https://openrouter.ai/api/v1",
+    )
 
 
 class StoredMessage(BaseModel):
@@ -196,26 +202,159 @@ async def _validate_terraform(hcl: str, rec_id: str) -> tuple[bool | None, list[
         shutil.rmtree(tmpdir, ignore_errors=True)
 
 
+@router.get("/conversations")
+async def list_conversations():
+    """Return all conversations for sidebar restore."""
+    convs = await asyncio.to_thread(db.list_conversations)
+    return convs
+
+
+@router.post("/chat/stream")
+async def chat_stream(request: "ChatRequest"):
+    """
+    SSE streaming chat endpoint. State-machine-driven:
+    - 'gathering': Ask clarifying questions using GATHER_PROMPT. Detect [READY_TO_ARCHITECT]
+      to auto-transition to 'presenting' and stream the architecture.
+    - 'presenting' / 'complete': Stream the full architecture response.
+
+    SSE events:
+      data: {"type":"token","content":"..."}\n\n
+      data: {"type":"done","payload":{...}}\n\n
+      data: {"type":"error","message":"..."}\n\n
+    """
+    conv_id = request.conversation_id or str(uuid.uuid4())
+    await asyncio.to_thread(db.ensure_conversation, conv_id)
+
+    async def generate():
+        try:
+            state = await asyncio.to_thread(db.get_state, conv_id)
+            history = await asyncio.to_thread(db.get_history, conv_id)
+            llm = _make_llm()
+
+            if state == "gathering":
+                # Build gathering messages: system prompt + history + new user message
+                gather_messages: List[BaseMessage] = [
+                    SystemMessage(content=GATHER_PROMPT),
+                    *history,
+                    HumanMessage(content=request.message),
+                ]
+                full_response = ""
+                async for chunk in llm.astream(gather_messages):
+                    token = chunk.content or ""
+                    if token:
+                        full_response += token
+                        yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+                # Persist this turn
+                await asyncio.to_thread(db.save_message, conv_id, "human", request.message)
+
+                if READY_MARKER in full_response:
+                    # Strip marker from stored text
+                    clean_response = full_response.replace(READY_MARKER, "").strip()
+                    await asyncio.to_thread(db.save_message, conv_id, "ai", clean_response)
+                    await asyncio.to_thread(db.set_state, conv_id, "presenting")
+
+                    # Now generate the architecture
+                    yield f"data: {json.dumps({'type': 'status', 'content': 'Designing your architecture…'})}\n\n"
+                    updated_history = await asyncio.to_thread(db.get_history, conv_id)
+                    requirements = await asyncio.to_thread(extractor.extract, request.message)
+                    try:
+                        plan: ArchitecturePlan = await advisor.get_recommendation(requirements, updated_history)
+                    except StructuredOutputError as e:
+                        yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                        return
+
+                    rec_id = str(uuid.uuid4())
+                    await asyncio.to_thread(db.save_message, conv_id, "ai", plan.model_dump_json())
+                    await asyncio.to_thread(db.set_state, conv_id, "presenting")
+
+                    payload = {
+                        "phase": "presenting",
+                        "recommendation_id": rec_id,
+                        "conversation_id": conv_id,
+                        "text": plan.summary,
+                        "diagram": plan.diagram,
+                        "iac": [{"type": "terraform", "content": plan.iac_snippet}],
+                        "costs": {
+                            "total": plan.cost_estimate.total,
+                            "breakdown": [b.model_dump() for b in plan.cost_estimate.breakdown],
+                        },
+                        "services": [
+                            {"name": s.name, "description": s.description, "rationale": s.rationale}
+                            for s in plan.services
+                        ],
+                    }
+                    yield f"data: {json.dumps({'type': 'done', 'payload': payload})}\n\n"
+                else:
+                    await asyncio.to_thread(db.save_message, conv_id, "ai", full_response)
+                    payload = {
+                        "phase": "gathering",
+                        "conversation_id": conv_id,
+                        "text": full_response,
+                    }
+                    yield f"data: {json.dumps({'type': 'done', 'payload': payload})}\n\n"
+
+            else:
+                # presenting or complete — generate full architecture
+                history_msgs: List[BaseMessage] = [
+                    *history,
+                    HumanMessage(content=request.message),
+                ]
+                requirements = await asyncio.to_thread(extractor.extract, request.message)
+                await asyncio.to_thread(db.save_message, conv_id, "human", request.message)
+
+                # Stream a status token so the frontend shows activity
+                yield f"data: {json.dumps({'type': 'status', 'content': 'Updating architecture…'})}\n\n"
+
+                try:
+                    plan = await advisor.get_recommendation(requirements, history)
+                except StructuredOutputError as e:
+                    yield f"data: {json.dumps({'type': 'error', 'message': str(e)})}\n\n"
+                    return
+
+                rec_id = str(uuid.uuid4())
+                await asyncio.to_thread(db.save_message, conv_id, "ai", plan.model_dump_json())
+
+                payload = {
+                    "phase": "presenting",
+                    "recommendation_id": rec_id,
+                    "conversation_id": conv_id,
+                    "text": plan.summary,
+                    "diagram": plan.diagram,
+                    "iac": [{"type": "terraform", "content": plan.iac_snippet}],
+                    "costs": {
+                        "total": plan.cost_estimate.total,
+                        "breakdown": [b.model_dump() for b in plan.cost_estimate.breakdown],
+                    },
+                    "services": [
+                        {"name": s.name, "description": s.description, "rationale": s.rationale}
+                        for s in plan.services
+                    ],
+                }
+                yield f"data: {json.dumps({'type': 'done', 'payload': payload})}\n\n"
+
+        except Exception as e:
+            print(f"[Stream] Unhandled error for {conv_id}: {e}")
+            yield f"data: {json.dumps({'type': 'error', 'message': 'Internal server error'})}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
+
+
 @router.post("/chat", response_model=ChatResponse)
 async def chat(request: ChatRequest):
-    # 1. Resolve conversation_id — use provided or create new UUID4 (D-15)
+    # 1. Resolve conversation_id — use provided or create new UUID4
     conv_id = request.conversation_id or str(uuid.uuid4())
+    await asyncio.to_thread(db.ensure_conversation, conv_id)
 
-    # 2. Restore or initialize history
-    if conv_id not in _conversation_history:
-        # Restore from client cache if backend lost state (container restart)
-        if request.history:
-            _conversation_history[conv_id] = _deserialize_history(
-                [m.model_dump() for m in request.history]
-            )
-        else:
-            _conversation_history[conv_id] = []
-    elif request.history is not None:
-        # Client sends history: [] (empty) as authoritative signal to reset (clear flow)
-        if len(request.history) == 0:
-            _conversation_history[conv_id] = []
-
-    history = _conversation_history[conv_id]
+    # 2. Restore or initialize history from DB (source of truth)
+    history = await asyncio.to_thread(db.get_history, conv_id)
 
     # 3. Extract requirements — wrap sync call in thread to avoid blocking event loop
     requirements = await asyncio.to_thread(extractor.extract, request.message)
@@ -224,7 +363,6 @@ async def chat(request: ChatRequest):
     try:
         plan: ArchitecturePlan = await advisor.get_recommendation(requirements, history)
     except StructuredOutputError as e:
-        # D-20: return HTTP 200 with error field — frontend shows error bubble + toast
         return ChatResponse(
             recommendation_id=str(uuid.uuid4()),
             conversation_id=conv_id,
@@ -236,14 +374,13 @@ async def chat(request: ChatRequest):
             error=str(e),
         )
 
-    # 5. Append this turn to history (AIMessage stores plan as JSON string — D-12, Pattern 4)
-    history.append(HumanMessage(content=request.message))
-    history.append(AIMessage(content=plan.model_dump_json()))
-    _conversation_history[conv_id] = history
+    # 5. Persist this turn to DB
+    await asyncio.to_thread(db.save_message, conv_id, "human", request.message)
+    await asyncio.to_thread(db.save_message, conv_id, "ai", plan.model_dump_json())
 
     # 6. Build response
     return ChatResponse(
-        recommendation_id=str(uuid.uuid4()),           # CHAT-04: real UUID
+        recommendation_id=str(uuid.uuid4()),
         conversation_id=conv_id,
         text=plan.summary,
         diagram=plan.diagram,
@@ -265,12 +402,8 @@ async def chat(request: ChatRequest):
 
 @router.post("/chat/{conversation_id}/compact", response_model=CompactResponse)
 async def compact_conversation(conversation_id: str):
-    """
-    Summarize conversation history into a compact system message.
-    Replaces full history with a single SystemMessage carrying the summary.
-    Architectural context is preserved (D-09).
-    """
-    history = _conversation_history.get(conversation_id, [])
+    """Summarize conversation history into a compact system message."""
+    history = await asyncio.to_thread(db.get_history, conversation_id)
     if not history:
         raise HTTPException(status_code=404, detail="Conversation not found or empty")
 
@@ -280,9 +413,11 @@ async def compact_conversation(conversation_id: str):
         raise HTTPException(status_code=500, detail=f"Compaction failed: {e}")
 
     # Replace history with single SystemMessage carrying the summary
-    _conversation_history[conversation_id] = [
-        SystemMessage(content=f"Previous conversation summary:\n{summary}")
-    ]
+    await asyncio.to_thread(db.clear_conversation, conversation_id)
+    await asyncio.to_thread(
+        db.save_message, conversation_id, "system",
+        f"Previous conversation summary:\n{summary}"
+    )
 
     return CompactResponse(
         conversation_id=conversation_id,
@@ -293,13 +428,8 @@ async def compact_conversation(conversation_id: str):
 
 @router.post("/chat/{conversation_id}/clear", response_model=ClearResponse)
 async def clear_conversation(conversation_id: str):
-    """
-    Wipe conversation history for a session. conversation_id is retained (D-10).
-    Next message to this conversation_id starts fresh.
-    """
-    if conversation_id in _conversation_history:
-        del _conversation_history[conversation_id]
-
+    """Wipe conversation history for a session."""
+    await asyncio.to_thread(db.clear_conversation, conversation_id)
     return ClearResponse(
         conversation_id=conversation_id,
         message="Conversation history cleared.",
@@ -308,31 +438,18 @@ async def clear_conversation(conversation_id: str):
 
 @router.post("/chat/{conversation_id}/approve", response_model=ApproveResponse)
 async def approve_plan(conversation_id: str, request: ApproveRequest):
-    """
-    Generate and validate a full Terraform HCL config for the approved plan.
-
-    Two-step process (D-04):
-    1. LLM generates full HCL from conversation history + TERRAFORM_FULL_PROMPT
-    2. terraform validate subprocess checks for syntax errors
-
-    Cache (D-03): If recommendation_id already in _terraform_cache, returns cached HCL
-    (re-approval is idempotent — no duplicate LLM calls).
-
-    Response: {recommendation_id, hcl, valid, validation_errors}
-    - valid=True/False: terraform validate result
-    - valid=None: terraform CLI not installed (dev env fallback)
-    - validation_errors: list of error summary strings from terraform diagnostics
-    HTTP 200 always — even on validation failure (frontend shows warning toast, D-05).
-    """
+    """Generate and validate a full Terraform HCL config for the approved plan."""
     rec_id = request.recommendation_id
-    history = _conversation_history.get(conversation_id, [])
+    history = await asyncio.to_thread(db.get_history, conversation_id)
 
-    # Check cache first — idempotent re-approval
     if rec_id in _terraform_cache:
         hcl = _terraform_cache[rec_id]
     else:
         hcl = await _generate_full_terraform(history)
         _terraform_cache[rec_id] = hcl
+
+    # Mark conversation as complete once approved
+    await asyncio.to_thread(db.set_state, conversation_id, "complete")
 
     valid, errors = await _validate_terraform(hcl, rec_id)
     return ApproveResponse(

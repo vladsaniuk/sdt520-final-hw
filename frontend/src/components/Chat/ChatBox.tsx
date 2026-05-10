@@ -200,81 +200,140 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
     const userMessage: Message = { role: 'user', content: input }
     const updatedMessages = [...messages, userMessage]
     setMessages(updatedMessages)
+    const sentInput = input
     setInput('')
     setLoading(true)
 
-    // Serialize history to send with request (messages BEFORE this turn)
-    const serializedHistory = serializeHistory(messages)
+    // Placeholder assistant bubble that gets filled token by token
+    const assistantPlaceholder: Message = { role: 'assistant', content: '' }
+    setMessages(prev => [...prev, assistantPlaceholder])
 
     try {
-      const response = await fetch('/api/v1/chat', {
+      const response = await fetch('/api/v1/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          message: input,
+          message: sentInput,
           conversation_id: conversationId,
-          history: serializedHistory,
         }),
       })
-      const data = await response.json()
 
-      // Update conversation_id from server (server may assign new one)
-      if (data.conversation_id && data.conversation_id !== conversationId) {
-        setConversationId(data.conversation_id)
-        localStorage.setItem('aws_advisor_conv_id', data.conversation_id)
+      if (!response.ok || !response.body) {
+        throw new Error(`HTTP ${response.status}`)
       }
 
-      // D-20: server returns error field on structured output failure
-      if (data.error) {
-        const errorMsg: Message = { role: 'error', content: data.error }
-        const withError = [...updatedMessages, errorMsg]
-        setMessages(withError)
-        toast({
-          title: 'Plan generation failed',
-          description: 'Structured output could not be parsed. See conversation for details.',
-          status: 'error',
-          duration: 5000,
-          isClosable: true,
-          position: 'bottom',
-        })
-        return
+      const reader = response.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let streamingContent = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        // SSE lines are separated by \n\n
+        const parts = buffer.split('\n\n')
+        buffer = parts.pop() ?? ''
+
+        for (const part of parts) {
+          const line = part.trim()
+          if (!line.startsWith('data: ')) continue
+          const jsonStr = line.slice(6)
+          let event: Record<string, unknown>
+          try {
+            event = JSON.parse(jsonStr)
+          } catch {
+            continue
+          }
+
+          if (event.type === 'token') {
+            streamingContent += (event.content as string)
+            // Update the last assistant bubble in real-time
+            setMessages(prev => {
+              const copy = [...prev]
+              const lastIdx = copy.length - 1
+              if (copy[lastIdx]?.role === 'assistant') {
+                copy[lastIdx] = { ...copy[lastIdx], content: streamingContent }
+              }
+              return copy
+            })
+          } else if (event.type === 'status') {
+            setMessages(prev => {
+              const copy = [...prev]
+              const lastIdx = copy.length - 1
+              if (copy[lastIdx]?.role === 'assistant') {
+                copy[lastIdx] = { ...copy[lastIdx], content: event.content as string }
+              }
+              return copy
+            })
+            streamingContent = ''
+          } else if (event.type === 'done') {
+            const payload = event.payload as Record<string, unknown>
+            const phase = payload.phase as string
+            const newConvId = (payload.conversation_id as string) || conversationId
+
+            if (newConvId !== conversationId) {
+              setConversationId(newConvId)
+              localStorage.setItem('aws_advisor_conv_id', newConvId)
+            }
+
+            if (phase === 'gathering') {
+              // Replace placeholder with final gathering text
+              setMessages(prev => {
+                const copy = [...prev]
+                const lastIdx = copy.length - 1
+                if (copy[lastIdx]?.role === 'assistant') {
+                  copy[lastIdx] = { role: 'assistant', content: payload.text as string }
+                }
+                return copy
+              })
+            } else {
+              // presenting — attach architecture data to bubble
+              setMessages(prev => {
+                const copy = [...prev]
+                const lastIdx = copy.length - 1
+                if (copy[lastIdx]?.role === 'assistant') {
+                  copy[lastIdx] = {
+                    role: 'assistant',
+                    content: payload.text as string || streamingContent,
+                    diagram: payload.diagram as string | undefined,
+                    iac: payload.iac as IaC[] | undefined,
+                    costs: payload.costs as Costs | undefined,
+                    services: payload.services as ServiceItem[] | undefined,
+                    recommendationId: payload.recommendation_id as string | undefined,
+                  }
+                }
+                return copy
+              })
+            }
+
+            const updatedAt = Date.now()
+            localStorage.setItem('aws_advisor_conv_id', newConvId)
+            onSessionUpdate?.(newConvId, messages, updatedAt)
+
+          } else if (event.type === 'error') {
+            const errorMsg: Message = { role: 'error', content: event.message as string }
+            setMessages(prev => {
+              const copy = prev.filter((_, idx) => idx !== prev.length - 1)
+              return [...copy, errorMsg]
+            })
+            toast({
+              title: 'Plan generation failed',
+              description: String(event.message),
+              status: 'error',
+              duration: 5000,
+              isClosable: true,
+              position: 'bottom',
+            })
+          }
+        }
       }
-
-      // Update fill with actual token usage if available
-      if (data.usage?.prompt_tokens) {
-        setFillPercent(Math.min(
-          Math.round((data.usage.prompt_tokens / MODEL_MAX_TOKENS) * 100),
-          100
-        ))
-      }
-
-      const assistantMessage: Message = {
-        role: 'assistant',
-        content: data.text || '',
-        diagram: data.diagram,
-        iac: data.iac,
-        costs: data.costs,
-        services: data.services,
-        recommendationId: data.recommendation_id,
-      }
-      const finalMessages = [...updatedMessages, assistantMessage]
-      setMessages(finalMessages)
-
-      // Persist to localStorage
-      const newConvId = data.conversation_id || conversationId
-      const updatedAt = Date.now()
-      localStorage.setItem('aws_advisor_conv_id', newConvId)
-      localStorage.setItem(
-        `aws_advisor_history_${newConvId}`,
-        JSON.stringify(serializeHistory(finalMessages))
-      )
-      localStorage.setItem(`aws_advisor_updated_${newConvId}`, String(updatedAt))
-
-      // Notify App.tsx of session update
-      onSessionUpdate?.(newConvId, finalMessages, updatedAt)
 
     } catch {
       setError('Something went wrong — please try again.')
+      // Remove the placeholder bubble
+      setMessages(prev => prev.filter((_, idx) => idx !== prev.length - 1))
     } finally {
       setLoading(false)
     }
@@ -412,7 +471,7 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
               </Flex>
               <Text fontSize="2xl" fontWeight="bold" color="aws.squid">AWS Architecture Advisor</Text>
               <Text fontSize="sm" color="gray.500" textAlign="center" maxW="xs" lineHeight="relaxed">
-                Describe your AWS workload to get a production-ready architecture plan.
+                Describe your AWS workload and I'll guide you through the design process.
               </Text>
             </VStack>
             <Flex wrap="wrap" gap={2} justify="center" maxW="lg">
@@ -777,7 +836,7 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
             flex={1}
             resize="none"
             rows={1}
-            placeholder="Describe your AWS workload…"
+            placeholder="Describe your system or answer the advisor's questions…"
             fontSize="sm"
             borderRadius="xl"
             borderColor="gray.300"

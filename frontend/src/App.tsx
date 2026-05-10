@@ -1,4 +1,4 @@
-import { useState, useRef, useCallback } from 'react'
+import { useState, useRef, useCallback, useEffect } from 'react'
 import {
   Box,
   Flex,
@@ -18,9 +18,10 @@ type Page = 'chat' | 'knowledge'
 
 interface Session {
   id: string
-  title: string      // derived from first user message (max 32 chars)
-  turnCount: number  // count of user messages
-  updatedAt: number  // Date.now() at last update
+  title: string
+  turnCount: number
+  updatedAt: number
+  state?: string  // 'gathering' | 'presenting' | 'complete'
 }
 
 function getRelativeTime(ts: number): string {
@@ -44,6 +45,31 @@ function App() {
   const chatRef = useRef<ChatBoxHandle>(null)
   const toast = useToast()
 
+  // Load conversations from backend DB on mount for sidebar restore
+  useEffect(() => {
+    fetch('/api/v1/conversations')
+      .then(r => r.json())
+      .then((convs: Array<{ id: string; state: string; title: string; updated_at: number }>) => {
+        if (!Array.isArray(convs) || convs.length === 0) return
+        const loaded: Session[] = convs.map(c => ({
+          id: c.id,
+          title: c.title || 'New conversation',
+          turnCount: 0,
+          updatedAt: c.updated_at,
+          state: c.state,
+        }))
+        setSessions(loaded)
+        // Restore last active conversation
+        const lastConvId = localStorage.getItem('aws_advisor_conv_id')
+        if (lastConvId && loaded.some(s => s.id === lastConvId)) {
+          setActiveConvId(lastConvId)
+        } else if (loaded.length > 0) {
+          setActiveConvId(loaded[0].id)
+        }
+      })
+      .catch(() => {/* backend not yet ready — start fresh */})
+  }, [])
+
   // Called by ChatBox when messages change (new turn, clear, compact)
   const handleSessionUpdate = useCallback(
     (id: string, messages: Array<{ role: string; content: string }>, updatedAt: number) => {
@@ -58,8 +84,7 @@ function App() {
             s.id === id ? { ...s, title, turnCount, updatedAt } : s
           )
         }
-        // New session — add to top
-        return [{ id, title, turnCount, updatedAt }, ...prev]
+        return [{ id, title, turnCount, updatedAt, state: 'gathering' }, ...prev]
       })
       setActiveConvId(id)
     },
@@ -154,7 +179,9 @@ function App() {
                   {s.title}
                 </Text>
                 <Text fontSize="11px" color="gray.500" noOfLines={1}>
-                  {s.turnCount} turn{s.turnCount !== 1 ? 's' : ''} · {getRelativeTime(s.updatedAt)}
+                  {s.state === 'complete' ? '✅ ' : s.state === 'presenting' ? '📐 ' : '💬 '}
+                  {s.turnCount > 0 ? `${s.turnCount} turn${s.turnCount !== 1 ? 's' : ''} · ` : ''}
+                  {getRelativeTime(s.updatedAt)}
                 </Text>
               </Box>
             ))

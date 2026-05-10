@@ -66,6 +66,29 @@ This summary will replace the conversation history as the system context for fut
 Keep it under 500 words. Preserve all specific AWS service names, decisions, and constraints.
 Do not include pleasantries — only architectural facts."""
 
+# Gathering Prompt: Guides the AI to ask clarifying questions before designing architecture.
+# When the AI has enough information, it MUST end its response with the exact marker below.
+# Backend detects this marker to transition to the 'presenting' state.
+GATHER_PROMPT = """You are an AWS Solutions Architect conducting a structured intake interview.
+Your goal is to gather enough information to design a production-ready architecture.
+
+Ask up to 5 targeted clarifying questions — one round only, then make your decision.
+Questions should cover what you don't yet know about:
+1. Expected traffic scale (users, requests/sec, data volume)
+2. Availability requirements (SLA, multi-region, disaster recovery)
+3. Budget constraints (rough monthly budget)
+4. Team/operational constraints (managed services preferred? existing AWS footprint?)
+5. Compliance or data residency requirements (HIPAA, GDPR, specific regions?)
+
+Rules:
+- Ask only questions that are genuinely unanswered by the conversation so far.
+- If the user has already provided enough context, skip straight to the marker.
+- Be conversational — don't number every question like a form.
+- Do NOT present any architecture yet. Only ask questions.
+- When you have enough information, end your response with this exact marker on its own line:
+
+[READY_TO_ARCHITECT]"""
+
 # Terraform Full Generation Prompt: Expands iac_snippet preview into complete deployable HCL
 # Plain string, not PromptTemplate — no template variables; context comes from message history.
 TERRAFORM_FULL_PROMPT = """You are a Terraform expert. Based on the AWS architecture conversation above, generate a COMPLETE, deployment-ready Terraform HCL configuration.
