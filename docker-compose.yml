@@ -7,7 +7,12 @@ services:
       - "7687:7687"
     environment:
       - NEO4J_AUTH=neo4j/${NEO4J_PASSWORD:-password}
-      - NEO4J_PLUGINS=["apoc", "gds"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://localhost:7474 || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+      start_period: 30s
     volumes:
       - ./data/neo4j:/data
       - ./data/neo4j/logs:/logs
@@ -23,10 +28,20 @@ services:
       - LLM_API_KEY=${LLM_API_KEY}
       - NEO4J_URI=bolt://neo4j:7687
       - NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}
+      - ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}
     depends_on:
-      - neo4j
+      neo4j:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "curl", "-sf", "http://localhost:8000/api/v1/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 20s
     volumes:
       - ./backend:/app
+      - sqlite_data:/app/data
+      - ./logs:/logs
 
   frontend:
     build: ./frontend
@@ -34,7 +49,12 @@ services:
     ports:
       - "3000:5173"
     depends_on:
-      - backend
+      backend:
+        condition: service_healthy
+    restart: on-failure
     volumes:
       - ./frontend:/app
       - /app/node_modules
+
+volumes:
+  sqlite_data:

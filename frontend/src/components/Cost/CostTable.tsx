@@ -1,9 +1,21 @@
 import React from 'react'
+import {
+  Box,
+  Table,
+  Thead,
+  Tbody,
+  Tfoot,
+  Tr,
+  Th,
+  Td,
+  Badge,
+  Text,
+} from '@chakra-ui/react'
 
 interface BreakdownItem {
   service: string
   cost: number
-  is_calculated: bool
+  is_calculated: boolean
 }
 
 interface CostTableProps {
@@ -13,32 +25,34 @@ interface CostTableProps {
 
 export const CostTable: React.FC<CostTableProps> = ({ total, breakdown }) => {
   return (
-    <div className="bg-white rounded-lg border shadow-sm overflow-hidden my-4">
-      <table className="min-w-full divide-y divide-gray-200">
-        <thead className="bg-gray-50">
-          <tr>
-            <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">Service</th>
-            <th className="px-6 py-3 text-right text-xs font-medium text-gray-500 uppercase tracking-wider">Monthly Cost</th>
-          </tr>
-        </thead>
-        <tbody className="bg-white divide-y divide-gray-200">
+    <Box borderRadius="xl" overflow="hidden" border="1px solid" borderColor="gray.200" boxShadow="sm" my={2}>
+      <Table size="sm" variant="simple">
+        <Thead bg="aws.squid">
+          <Tr>
+            <Th color="white" textTransform="uppercase" letterSpacing="wider" fontSize="xs">Service</Th>
+            <Th color="white" textTransform="uppercase" letterSpacing="wider" fontSize="xs" isNumeric>Monthly Cost</Th>
+          </Tr>
+        </Thead>
+        <Tbody>
           {breakdown.map((item, i) => (
-            <tr key={i}>
-              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+            <Tr key={i} bg={i % 2 === 0 ? 'white' : 'gray.50'}>
+              <Td fontSize="sm" color="gray.800">
                 {item.service}
-                {!item.is_calculated && <span className="ml-2 text-xs text-orange-500 italic">(Not Calculated)</span>}
-              </td>
-              <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">
-                ${item.cost.toFixed(2)}
-              </td>
-            </tr>
+                {!item.is_calculated && (
+                  <Badge ml={2} colorScheme="gray" variant="subtle" fontSize="10px">est.</Badge>
+                )}
+              </Td>
+              <Td fontSize="sm" color="gray.800" isNumeric>${item.cost.toFixed(2)}</Td>
+            </Tr>
           ))}
-          <tr className="bg-gray-50 font-bold">
-            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">Total Estimate</td>
-            <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900 text-right">${total.toFixed(2)}</td>
-          </tr>
-        </tbody>
-      </table>
-    </div>
+        </Tbody>
+        <Tfoot>
+          <Tr bg="aws.squidDark">
+            <Td fontWeight="bold" color="white" fontSize="sm">Total Estimate</Td>
+            <Td fontWeight="bold" color="aws.orange" fontSize="sm" isNumeric>${total.toFixed(2)}</Td>
+          </Tr>
+        </Tfoot>
+      </Table>
+    </Box>
   )
 }
