@@ -249,12 +249,20 @@ async def chat_stream(request: "ChatRequest"):
                     *history,
                     HumanMessage(content=request.message),
                 ]
+                debug_payload = {
+                    "type": "debug",
+                    "event": "llm_call_start",
+                    "messages": [{"role": m.type, "content": m.content[:2000]} for m in gather_messages],
+                }
+                yield f"data: {json.dumps(debug_payload)}\n\n"
                 full_response = ""
                 async for chunk in llm.astream(gather_messages):
                     token = chunk.content or ""
                     if token:
                         full_response += token
                         yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+                yield f"data: {json.dumps({'type': 'debug', 'event': 'llm_call_done', 'token_count': len(full_response.split())})}\n\n"
 
                 # Persist this turn
                 await asyncio.to_thread(db.save_message, conv_id, "human", request.message)
@@ -295,12 +303,20 @@ async def chat_stream(request: "ChatRequest"):
                 ]
                 await asyncio.to_thread(db.save_message, conv_id, "human", request.message)
 
+                debug_payload_conv = {
+                    "type": "debug",
+                    "event": "llm_call_start",
+                    "messages": [{"role": m.type, "content": m.content[:2000]} for m in conv_messages],
+                }
+                yield f"data: {json.dumps(debug_payload_conv)}\n\n"
                 full_response = ""
                 async for chunk in llm.astream(conv_messages):
                     token = chunk.content or ""
                     if token:
                         full_response += token
                         yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+                yield f"data: {json.dumps({'type': 'debug', 'event': 'llm_call_done', 'token_count': len(full_response.split())})}\n\n"
 
                 # If ready signal appears in a follow-up, handle it too
                 if READY_SIGNAL_RE.search(full_response):
@@ -326,6 +342,7 @@ async def chat_stream(request: "ChatRequest"):
 
         except Exception as e:
             print(f"[Stream] Unhandled error for {conv_id}: {e}")
+            yield f"data: {json.dumps({'type': 'debug', 'event': 'error', 'detail': str(e)})}\n\n"
             yield f"data: {json.dumps({'type': 'error', 'message': 'Internal server error'})}\n\n"
 
     return StreamingResponse(
@@ -491,12 +508,20 @@ async def generate_architecture(request: GenerateRequest):
             messages_for_arch = await advisor.build_advisor_messages(history)
             llm = _make_llm()
 
+            debug_payload = {
+                "type": "debug",
+                "event": "llm_call_start",
+                "messages": [{"role": m.type, "content": m.content[:2000]} for m in messages_for_arch],
+            }
+            yield f"data: {json.dumps(debug_payload)}\n\n"
             arch_text = ""
             async for chunk in llm.astream(messages_for_arch):
                 token = chunk.content or ""
                 if token:
                     arch_text += token
                     yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'debug', 'event': 'llm_call_done', 'token_count': len(arch_text.split())})}\n\n"
 
             # Parse accumulated JSON into ArchitecturePlan
             clean_text = _strip_json_fences(arch_text)
@@ -522,6 +547,7 @@ async def generate_architecture(request: GenerateRequest):
 
         except Exception as e:
             print(f"[generate/architecture] Unhandled error for {conv_id}: {e}")
+            yield f"data: {json.dumps({'type': 'debug', 'event': 'error', 'detail': str(e)})}\n\n"
             yield f"data: {json.dumps({'type': 'error', 'message': 'Architecture generation failed'})}\n\n"
 
     return StreamingResponse(
@@ -564,12 +590,20 @@ async def generate_costs(request: GenerateRequest):
             ]
 
             llm = _make_llm()
+            debug_payload = {
+                "type": "debug",
+                "event": "llm_call_start",
+                "messages": [{"role": m.type, "content": m.content[:2000]} for m in messages],
+            }
+            yield f"data: {json.dumps(debug_payload)}\n\n"
             cost_text = ""
             async for chunk in llm.astream(messages):
                 token = chunk.content or ""
                 if token:
                     cost_text += token
                     yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'debug', 'event': 'llm_call_done', 'token_count': len(cost_text.split())})}\n\n"
 
             await asyncio.to_thread(db.save_artifact, conv_id, "costs", cost_text)
             await asyncio.to_thread(db.set_state, conv_id, "costs_ready")
@@ -578,6 +612,7 @@ async def generate_costs(request: GenerateRequest):
 
         except Exception as e:
             print(f"[generate/costs] Unhandled error for {conv_id}: {e}")
+            yield f"data: {json.dumps({'type': 'debug', 'event': 'error', 'detail': str(e)})}\n\n"
             yield f"data: {json.dumps({'type': 'error', 'message': 'Cost generation failed'})}\n\n"
 
     return StreamingResponse(
@@ -611,12 +646,20 @@ async def generate_terraform(request: GenerateRequest):
             ]
 
             llm = _make_llm()
+            debug_payload = {
+                "type": "debug",
+                "event": "llm_call_start",
+                "messages": [{"role": m.type, "content": m.content[:2000]} for m in messages],
+            }
+            yield f"data: {json.dumps(debug_payload)}\n\n"
             hcl_text = ""
             async for chunk in llm.astream(messages):
                 token = chunk.content or ""
                 if token:
                     hcl_text += token
                     yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+            yield f"data: {json.dumps({'type': 'debug', 'event': 'llm_call_done', 'token_count': len(hcl_text.split())})}\n\n"
 
             clean_hcl = _strip_json_fences(hcl_text)
             await asyncio.to_thread(db.save_artifact, conv_id, "terraform", clean_hcl)
@@ -626,6 +669,7 @@ async def generate_terraform(request: GenerateRequest):
 
         except Exception as e:
             print(f"[generate/terraform] Unhandled error for {conv_id}: {e}")
+            yield f"data: {json.dumps({'type': 'debug', 'event': 'error', 'detail': str(e)})}\n\n"
             yield f"data: {json.dumps({'type': 'error', 'message': 'Terraform generation failed'})}\n\n"
 
     return StreamingResponse(
@@ -633,3 +677,44 @@ async def generate_terraform(request: GenerateRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@router.get("/debug/info")
+async def debug_info():
+    """Return system snapshot for the debug panel."""
+    neo4j_connected = advisor.graph is not None
+    neo4j_node_count = 0
+    if neo4j_connected:
+        try:
+            result = await asyncio.to_thread(advisor.graph.query, "MATCH (n) RETURN count(n) as count")
+            neo4j_node_count = result[0]["count"] if result else 0
+        except Exception:
+            neo4j_connected = False
+
+    conv_count = await asyncio.to_thread(db.list_conversations)
+
+    return {
+        "model": {
+            "name": os.getenv("LLM_MODEL", "openai/gpt-4o"),
+            "provider": "OpenRouter",
+            "base_url": "https://openrouter.ai/api/v1",
+        },
+        "neo4j": {
+            "connected": neo4j_connected,
+            "uri": os.getenv("NEO4J_URI", "bolt://neo4j:7687"),
+            "node_count": neo4j_node_count,
+        },
+        "sqlite": {
+            "path": "/app/data/advisor.db",
+            "conversation_count": len(conv_count),
+        },
+        "prompts": {
+            "gather": GATHER_PROMPT,
+            "advisor": ADVISOR_PROMPT,
+            "terraform": TERRAFORM_FULL_PROMPT,
+        },
+        "env": {
+            "llm_api_key_set": bool(os.getenv("LLM_API_KEY")),
+            "neo4j_uri": os.getenv("NEO4J_URI", "bolt://neo4j:7687"),
+        },
+    }
