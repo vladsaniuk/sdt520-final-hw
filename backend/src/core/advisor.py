@@ -129,20 +129,9 @@ class ArchitectureAdvisor:
 
         Returns a list of BaseMessage ready for llm.astream() or llm.ainvoke().
         """
-        # 1. Graph context
-        if not graph_context:
-            context_query = """
-                MATCH (s:AWS_Service)-[:ALIGNS_WITH]->(p:WellArchitected_Pillar)
-                RETURN s.name as service, s.description as desc, p.name as pillar
-                LIMIT 20
-            """
-            raw_graph = await asyncio.to_thread(self.graph.query, context_query) if self.graph else []
-            graph_context = str(raw_graph) if raw_graph else ""
-
-        # 2. Vector context — build query from ALL human messages (full requirements context)
+        # 1. Vector context from uploaded documents (sole source of grounding)
         human_msgs = [msg.content for msg in history if isinstance(msg, HumanMessage)]
         requirements_text = human_msgs[-1] if human_msgs else ""
-        # Use concatenation of all user turns as the RAG query for better coverage
         rag_query = " ".join(human_msgs)[-1000:] if human_msgs else "AWS architecture"
 
         rag_result = await asyncio.to_thread(
@@ -151,9 +140,7 @@ class ArchitectureAdvisor:
         vector_context = rag_result["text"]
         rag_meta = rag_result["meta"]
 
-        combined_context = graph_context
-        if vector_context:
-            combined_context += f"\n\n--- Relevant excerpts from uploaded documents ---\n{vector_context}"
+        combined_context = vector_context
 
         # 3. Build system message from ADVISOR_PROMPT template
         system_content = ADVISOR_PROMPT.format(
@@ -189,24 +176,13 @@ class ArchitectureAdvisor:
         Raises:
             StructuredOutputError: If JSON parse fails after one retry.
         """
-        # 1. Structural graph context (sync Neo4j query — acceptable for demo)
-        context_query = """
-            MATCH (s:AWS_Service)-[:ALIGNS_WITH]->(p:WellArchitected_Pillar)
-            RETURN s.name as service, s.description as desc, p.name as pillar
-            LIMIT 20
-        """
-        graph_context = self.graph.query(context_query) if self.graph else []
-
-        # 2. Vector context — sync blocking call; acceptable for demo (no asyncio event loop stall
-        # because sentence-transformers uses numpy, not IO). Wrap if needed: asyncio.to_thread()
+        # 1. Vector context from uploaded documents (sole source of grounding)
         requirements_text = json.dumps(requirements)
         rag_result = _get_vector_context(requirements_text, top_k=5)
         vector_context = rag_result["text"]
 
-        # 3. Combine context
-        combined_context = str(graph_context) if graph_context else ""
-        if vector_context:
-            combined_context += f"\n\n--- Relevant excerpts from uploaded documents ---\n{vector_context}"
+        # 2. Build context from uploaded docs only
+        combined_context = vector_context
 
         # 4. Build message list: system (fresh context) + history + current user turn
         # IMPORTANT: ADVISOR_PROMPT is a PromptTemplate — must call .format() before SystemMessage
