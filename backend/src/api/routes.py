@@ -710,7 +710,7 @@ async def debug_info():
         },
         "prompts": {
             "gather": GATHER_PROMPT,
-            "advisor": ADVISOR_PROMPT,
+            "advisor": ADVISOR_PROMPT.template if hasattr(ADVISOR_PROMPT, "template") else str(ADVISOR_PROMPT),
             "terraform": TERRAFORM_FULL_PROMPT,
         },
         "env": {

@@ -24,7 +24,7 @@ export interface DebugInfo {
   model: { name: string; provider: string; base_url: string }
   neo4j: { connected: boolean; uri: string; node_count: number }
   sqlite: { path: string; conversation_count: number }
-  prompts: { gather: string; advisor: string; terraform: string }
+  prompts: { gather: string; advisor: string | Record<string, any>; terraform: string }
   env: { llm_api_key_set: boolean; neo4j_uri: string }
 }
 
@@ -175,7 +175,9 @@ export const DebugTab: React.FC<DebugTabProps> = ({ events, info }) => {
                     </AccordionButton>
                     <AccordionPanel pb={2} px={3} bg="gray.900" maxH="200px" overflowY="auto">
                       <Code whiteSpace="pre-wrap" fontSize="xs" display="block" bg="transparent" color="gray.300">
-                        {info.prompts.advisor}
+                        {typeof info.prompts.advisor === 'string'
+                          ? info.prompts.advisor
+                          : (info.prompts.advisor as any).template ?? JSON.stringify(info.prompts.advisor, null, 2)}
                       </Code>
                     </AccordionPanel>
                   </AccordionItem>
