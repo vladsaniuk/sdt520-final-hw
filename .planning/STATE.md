@@ -28,7 +28,7 @@ See: .planning/PROJECT.md (updated 2025-07-11)
 Phase: 03 (multi-turn-chat) — VERIFIED ✅
 Plan: 4 of 4
 Status: Phase verified — all 6 CHAT requirements satisfied
-Last activity: 2026-05-10
+Last activity: 2026-05-10 - Completed quick task 260510-vvy: Clean up project — remove spec-kit artifacts and unused scaffolding
 
 Progress: [███░░░░░░░] 33%
 
@@ -85,6 +85,12 @@ None.
 - AWS Pricing API coverage is EC2-only; cost estimates will be misleading for non-EC2 architectures (flag at Phase 3)
 - No tests exist for any component — regression risk is high; watch for silent failures at each phase gate
 - Neo4j vector index dimension is 384 (sentence-transformers all-MiniLM-L6-v2), NOT 1536 — must not change without rebuilding index
+
+### Quick Tasks Completed
+
+| # | Description | Date | Commit | Directory |
+|---|-------------|------|--------|-----------|
+| 260510-vvy | Clean up project: remove spec-kit artifacts and unused scaffolding | 2026-05-10 | b88a15c | [260510-vvy-clean-up-project-remove-spec-kit-artifac](.planning/quick/260510-vvy-clean-up-project-remove-spec-kit-artifac/) |
 
 ## Session Continuity
 
