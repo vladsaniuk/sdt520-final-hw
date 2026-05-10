@@ -87,8 +87,11 @@ Plans:
   2. The generated `.tf` file is downloadable directly from the chat UI
   3. The generated Terraform config passes structural validation — no syntax errors, valid provider blocks
   4. Each approved plan produces a unique persisted `.tf` file tied to its `recommendation_id`
-**Plans**: TBD
-**UI hint**: yes
+**Plans**: 2 plans
+
+Plans:
+- [ ] 04-01-PLAN.md — Backend: TERRAFORM_FULL_PROMPT + approve endpoint + HCL generation + terraform validate + Dockerfile CLI install (TERRAFORM-02, TERRAFORM-04)
+- [ ] 04-02-PLAN.md — Frontend: ChatBox approval state + Approve button + status bubble + Download .tf Blob handler (TERRAFORM-01, TERRAFORM-03)
 
 ### Phase 5: Docker Polish
 **Goal**: The entire application runs from `docker compose up` with no manual setup steps — demo-ready for zero-configuration evaluation
