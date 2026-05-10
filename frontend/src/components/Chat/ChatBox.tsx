@@ -18,40 +18,10 @@ import {
   Tag,
 } from '@chakra-ui/react'
 import { MdSend, MdBolt, MdWarning, MdCompress, MdClear } from 'react-icons/md'
-import { MermaidViewer } from '../Diagram/MermaidViewer'
-import { CodeSnippet } from '../Code/Snippet'
-import { CostTable } from '../Cost/CostTable'
-
-interface IaC {
-  type: string
-  content: string
-}
-
-interface CostBreakdown {
-  service: string
-  cost: number
-  is_calculated: boolean
-}
-
-interface Costs {
-  total: number
-  breakdown: CostBreakdown[]
-}
-
-interface ServiceItem {
-  name: string
-  description: string
-  rationale: string
-}
 
 interface Message {
   role: 'user' | 'assistant' | 'error' | 'approval'
   content: string
-  diagram?: string
-  iac?: IaC[]
-  costs?: Costs
-  services?: ServiceItem[]
-  recommendationId?: string
 }
 
 interface StoredMessage {
@@ -72,6 +42,10 @@ interface ChatBoxProps {
     messages: Message[],
     updatedAt: number,
   ) => void
+  /** Called when backend signals new types are ready for generation */
+  onUnlock?: (types: string[]) => void
+  /** Called when backend signals existing artifacts are stale */
+  onStale?: (types: string[]) => void
 }
 
 const MODEL_MAX_TOKENS = 128_000
@@ -83,19 +57,6 @@ function estimateFillPercent(messages: Message[], currentInput: string): number 
   return Math.min(Math.round((estimatedTokens / MODEL_MAX_TOKENS) * 100), 100)
 }
 
-function computeDiff(
-  prev: ServiceItem[] | undefined,
-  curr: ServiceItem[]
-): { added: string[]; removed: string[] } {
-  if (!prev || prev.length === 0) return { added: [], removed: [] }
-  const prevNames = new Set(prev.map(s => s.name))
-  const currNames = new Set(curr.map(s => s.name))
-  return {
-    added: curr.map(s => s.name).filter(n => !prevNames.has(n)),
-    removed: prev.map(s => s.name).filter(n => !currNames.has(n)),
-  }
-}
-
 function serializeHistory(messages: Message[]): StoredMessage[] {
   return messages
     .filter(m => m.role === 'user' || m.role === 'assistant')
@@ -104,6 +65,8 @@ function serializeHistory(messages: Message[]): StoredMessage[] {
       content: m.content,
     }))
 }
+
+// Note: serializeHistory is retained for localStorage history restore on mount
 
 function getRelativeTime(ts: number): string {
   const diffMs = Date.now() - ts
@@ -124,7 +87,7 @@ const PROMPT_CHIPS = [
 ]
 
 export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
-  ({ conversationId: externalConvId, onSessionUpdate }, ref) => {
+  ({ conversationId: externalConvId, onSessionUpdate, onUnlock, onStale }, ref) => {
   const [input, setInput] = useState('')
   const [messages, setMessages] = useState<Message[]>([])
   const [loading, setLoading] = useState(false)
@@ -146,11 +109,6 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
   const [clearConfirming, setClearConfirming] = useState(false)
 
   // Approval state (D-06)
-  const [approvedRecommendationId, setApprovedRecommendationId] = useState<string | null>(null)
-  const [approvedHcl, setApprovedHcl] = useState<string | null>(null)
-  const [approvalStatus, setApprovalStatus] = useState<'idle' | 'pending' | 'done' | 'error'>('idle')
-  const [validationWarning, setValidationWarning] = useState<boolean>(false)
-
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
@@ -259,14 +217,11 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
               return copy
             })
           } else if (event.type === 'status') {
-            setMessages(prev => {
-              const copy = [...prev]
-              const lastIdx = copy.length - 1
-              if (copy[lastIdx]?.role === 'assistant') {
-                copy[lastIdx] = { ...copy[lastIdx], content: event.content as string }
-              }
-              return copy
-            })
+            // Push a NEW assistant bubble — preserves any streaming gathering text in the previous bubble
+            setMessages(prev => [
+              ...prev,
+              { role: 'assistant', content: event.content as string },
+            ])
             streamingContent = ''
           } else if (event.type === 'done') {
             const payload = event.payload as Record<string, unknown>
@@ -278,30 +233,36 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
               localStorage.setItem('aws_advisor_conv_id', newConvId)
             }
 
-            if (phase === 'gathering') {
-              // Replace placeholder with final gathering text
+            // Wire unlock / stale signals to parent (ActionBar)
+            const readyFor = payload.ready_for as string[] | undefined
+            const staleTypes = (event.stale ?? payload.stale) as string[] | undefined
+            if (readyFor && readyFor.length > 0) {
+              onUnlock?.(readyFor)
+            }
+            if (staleTypes && staleTypes.length > 0) {
+              onStale?.(staleTypes)
+            }
+
+            // Chat bubbles only show text — architecture/diagram/costs are in the drawer
+            if (phase === 'gathering' || !phase) {
+              // Replace last placeholder with final gathering text
               setMessages(prev => {
                 const copy = [...prev]
                 const lastIdx = copy.length - 1
                 if (copy[lastIdx]?.role === 'assistant') {
-                  copy[lastIdx] = { role: 'assistant', content: payload.text as string }
+                  copy[lastIdx] = { role: 'assistant', content: (payload.text as string) || streamingContent }
                 }
                 return copy
               })
             } else {
-              // presenting — attach architecture data to bubble
+              // presenting / architecture_ready — show summary text only (no inline diagram)
               setMessages(prev => {
                 const copy = [...prev]
                 const lastIdx = copy.length - 1
                 if (copy[lastIdx]?.role === 'assistant') {
                   copy[lastIdx] = {
                     role: 'assistant',
-                    content: payload.text as string || streamingContent,
-                    diagram: payload.diagram as string | undefined,
-                    iac: payload.iac as IaC[] | undefined,
-                    costs: payload.costs as Costs | undefined,
-                    services: payload.services as ServiceItem[] | undefined,
-                    recommendationId: payload.recommendation_id as string | undefined,
+                    content: (payload.text as string) || streamingContent,
                   }
                 }
                 return copy
@@ -392,68 +353,6 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
     hasMessages: () => messages.length > 0,
   }), [handleCompact, handleClear, messages.length])
 
-  const handleApprove = async (recommendationId: string) => {
-    // Reset previous approval state — only one plan approved at a time (D-01)
-    setApprovedRecommendationId(recommendationId)
-    setApprovalStatus('pending')
-    setApprovedHcl(null)
-    setValidationWarning(false)
-
-    // Insert approval status bubble into messages thread (D-21: new bubble per action)
-    // Filter out any existing approval bubble first — only one plan approved at a time (D-01)
-    setMessages(prev => [
-      ...prev.filter(m => m.role !== 'approval'),
-      { role: 'approval', content: 'Generating Terraform config…' },
-    ])
-
-    try {
-      const res = await fetch(`/api/v1/chat/${conversationId}/approve`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ recommendation_id: recommendationId }),
-      })
-      if (!res.ok) throw new Error(`Approve failed: ${res.status}`)
-      const data = await res.json()
-      setApprovedHcl(data.hcl)
-      setApprovalStatus('done')
-      // valid=false (not null) means terraform found syntax errors
-      setValidationWarning(data.valid === false)
-      if (data.valid === false && data.validation_errors?.length > 0) {
-        toast({
-          title: 'Terraform config generated with warnings',
-          description: data.validation_errors.slice(0, 2).join('; '),
-          status: 'warning',
-          duration: 6000,
-          isClosable: true,
-          position: 'bottom',
-        })
-      }
-    } catch {
-      setApprovalStatus('error')
-      toast({
-        title: 'Approval failed',
-        description: 'Could not generate Terraform config. Please try again.',
-        status: 'error',
-        duration: 4000,
-        isClosable: true,
-        position: 'bottom',
-      })
-    }
-  }
-
-  const handleDownload = () => {
-    if (!approvedHcl || !approvedRecommendationId) return
-    const blob = new Blob([approvedHcl], { type: 'text/plain' })
-    const url = URL.createObjectURL(blob)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `architecture-${approvedRecommendationId.slice(0, 8)}.tf`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    URL.revokeObjectURL(url)
-  }
-
   return (
     <Flex direction="column" h="full" bg="gray.50">
       {/* Messages / Welcome */}
@@ -499,16 +398,6 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
           /* Message list */
           <VStack px={4} py={6} spacing={6} align="stretch">
             {messages.map((msg, i) => {
-              // Compute diff for assistant messages (D-22)
-              const prevAssistantServices = messages
-                .slice(0, i)
-                .filter(m => m.role === 'assistant' && m.services)
-                .pop()?.services
-              const diff = msg.role === 'assistant' && msg.services && prevAssistantServices !== undefined
-                ? computeDiff(prevAssistantServices, msg.services)
-                : { added: [], removed: [] }
-              const hasDiff = diff.added.length > 0 || diff.removed.length > 0
-
               // Error bubble (D-20)
               if (msg.role === 'error') {
                 return (
@@ -548,57 +437,7 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
                 )
               }
 
-              // Approval status bubble (D-05) — role 'approval' inserted by handleApprove
-              if (msg.role === 'approval') {
-                return (
-                  <Flex key={i} gap={3} justify="flex-start">
-                    <Flex
-                      w={8} h={8} borderRadius="full" bg="aws.orange"
-                      align="center" justify="center" flexShrink={0} mt={1}
-                      boxShadow="sm"
-                    >
-                      <Icon as={MdBolt} color="aws.squid" boxSize={4} />
-                    </Flex>
-                    <Box
-                      bg="white"
-                      border="1px solid"
-                      borderColor="gray.200"
-                      borderRadius="2xl"
-                      borderTopLeftRadius="sm"
-                      px={4} py={3}
-                      boxShadow="sm"
-                    >
-                      {approvalStatus === 'pending' && (
-                        <HStack spacing={2}>
-                          <Spinner size="xs" color="gray.400" />
-                          <Text fontSize="sm" color="gray.500">Generating Terraform config…</Text>
-                        </HStack>
-                      )}
-                      {approvalStatus === 'done' && (
-                        <VStack align="start" spacing={2}>
-                          <Button
-                            size="sm"
-                            colorScheme="green"
-                            onClick={handleDownload}
-                          >
-                            Download .tf
-                          </Button>
-                          {validationWarning && (
-                            <Text fontSize="xs" color="orange.500">
-                              Config generated with warnings — review before deploying
-                            </Text>
-                          )}
-                        </VStack>
-                      )}
-                      {approvalStatus === 'error' && (
-                        <Text fontSize="sm" color="red.500">
-                          Generation failed. Please try again.
-                        </Text>
-                      )}
-                    </Box>
-                  </Flex>
-                )
-              }
+              // Approval bubble removed — Terraform is now in the ArtifactDrawer
 
               return (
                 <Flex key={i} gap={3} justify={msg.role === 'user' ? 'flex-end' : 'flex-start'}>
@@ -630,107 +469,7 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
                       <Text whiteSpace="pre-wrap">{msg.content}</Text>
                     </Box>
 
-                    {/* Diff badge row (D-21, D-22) — shown on assistant bubbles after first */}
-                    {msg.role === 'assistant' && hasDiff && (
-                      <HStack
-                        spacing={1}
-                        mt={1}
-                        flexWrap="wrap"
-                        aria-label={`Changes from previous plan: ${diff.added.join(', ')} added, ${diff.removed.join(', ')} removed`}
-                      >
-                        {diff.added.map(name => (
-                          <Tag
-                            key={`add-${name}`}
-                            size="sm"
-                            borderRadius="md"
-                            bg="green.100"
-                            color="green.700"
-                            fontWeight="semibold"
-                            fontSize="11px"
-                            px={2}
-                            py={0}
-                          >
-                            +{name}
-                          </Tag>
-                        ))}
-                        {diff.removed.map(name => (
-                          <Tag
-                            key={`rem-${name}`}
-                            size="sm"
-                            borderRadius="md"
-                            bg="red.100"
-                            color="red.700"
-                            fontWeight="semibold"
-                            fontSize="11px"
-                            px={2}
-                            py={0}
-                          >
-                            {'\u2212'}{name}
-                          </Tag>
-                        ))}
-                      </HStack>
-                    )}
-
-                    {/* Approve/Approved button — one plan approved at a time (D-01, D-05) */}
-                    {msg.role === 'assistant' && msg.recommendationId && (
-                      <HStack mt={2}>
-                        {approvedRecommendationId === msg.recommendationId ? (
-                          <Tag colorScheme="green" size="sm">✓ Approved</Tag>
-                        ) : (
-                          <Button
-                            size="xs"
-                            variant="outline"
-                            colorScheme="green"
-                            onClick={() => handleApprove(msg.recommendationId!)}
-                            isDisabled={approvalStatus === 'pending'}
-                          >
-                            Approve
-                          </Button>
-                        )}
-                      </HStack>
-                    )}
-
-                    {msg.role === 'assistant' && (
-                      <>
-                        {msg.diagram && <MermaidViewer definition={msg.diagram} />}
-                        {msg.costs && msg.costs.breakdown.length > 0 && (
-                          <CostTable total={msg.costs.total} breakdown={msg.costs.breakdown} />
-                        )}
-                        {msg.iac && msg.iac.length > 0 && (
-                          <Box mt={3} borderRadius="xl" overflow="hidden" border="1px solid" borderColor="gray.200" boxShadow="sm">
-                            <HStack px={4} py={2} bg="aws.squid" borderBottom="1px solid" borderColor="aws.squidLight" justify="space-between">
-                              <HStack spacing={2}>
-                                <Text fontSize="xs" fontWeight="bold" color="gray.300" textTransform="uppercase" letterSpacing="widest">
-                                  Terraform
-                                </Text>
-                              </HStack>
-                              <Button
-                                size="xs"
-                                bg="aws.orange"
-                                color="aws.squid"
-                                fontWeight="bold"
-                                _hover={{ bg: 'aws.orangeDark' }}
-                                onClick={() => msg.recommendationId && handleApprove(msg.recommendationId)}
-                                isDisabled={approvalStatus === 'pending' || !msg.recommendationId}
-                              >
-                                {approvedRecommendationId === msg.recommendationId ? 'Approved ✓' : 'Approve & Download'}
-                              </Button>
-                            </HStack>
-                            <Box p={4}>
-                              <VStack spacing={3} align="stretch">
-                                {msg.iac.map((snippet, j) => (
-                                  <CodeSnippet
-                                    key={j}
-                                    code={snippet.content}
-                                    language={snippet.type === 'terraform' ? 'hcl' : 'yaml'}
-                                  />
-                                ))}
-                              </VStack>
-                            </Box>
-                          </Box>
-                        )}
-                      </>
-                    )}
+                    {/* Architecture artifacts are now in the ArtifactDrawer — no inline rendering */}
                   </Box>
 
                   {msg.role === 'user' && (

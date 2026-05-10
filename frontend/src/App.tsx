@@ -13,6 +13,10 @@ import { ChatBox } from './components/Chat/ChatBox'
 import type { ChatBoxHandle } from './components/Chat/ChatBox'
 import { KnowledgeBase } from './pages/KnowledgeBase'
 import { MdAdd, MdBolt, MdOutlineArticle, MdCompress, MdClear } from 'react-icons/md'
+import { ActionBar } from './components/ActionBar'
+import type { GenerateType } from './components/ActionBar'
+import { ArtifactDrawer } from './components/ArtifactDrawer'
+import type { ArchitecturePlanData } from './components/ArtifactDrawer'
 
 type Page = 'chat' | 'knowledge'
 
@@ -45,6 +49,18 @@ function App() {
   const chatRef = useRef<ChatBoxHandle>(null)
   const toast = useToast()
 
+  // ActionBar + ArtifactDrawer state
+  const [unlockedButtons, setUnlockedButtons] = useState<GenerateType[]>([])
+  const [staleButtons, setStaleButtons] = useState<GenerateType[]>([])
+  const [loadingButton, setLoadingButton] = useState<GenerateType | null>(null)
+  const [drawerOpen, setDrawerOpen] = useState(false)
+  const [loadingTab, setLoadingTab] = useState<string | null>(null)
+  const [artifacts, setArtifacts] = useState<{
+    architecture?: ArchitecturePlanData | null
+    costs?: string | null
+    terraform?: string | null
+  }>({})
+
   // Load conversations from backend DB on mount for sidebar restore
   useEffect(() => {
     fetch('/api/v1/conversations')
@@ -69,6 +85,16 @@ function App() {
       })
       .catch(() => {/* backend not yet ready — start fresh */})
   }, [])
+
+  // Reset drawer/artifacts when active conversation changes (sidebar click)
+  useEffect(() => {
+    setUnlockedButtons([])
+    setStaleButtons([])
+    setArtifacts({})
+    setDrawerOpen(false)
+    setLoadingButton(null)
+    setLoadingTab(null)
+  }, [activeConvId])
 
   // Called by ChatBox when messages change (new turn, clear, compact)
   const handleSessionUpdate = useCallback(
@@ -103,18 +129,154 @@ function App() {
     setClearConfirming(false)
   }, [])
 
-  // New conversation — generate new UUID, clear active session
-  const handleNewConversation = useCallback(() => {
+  const hasMessages = chatRef.current?.hasMessages() ?? false
+
+  // ActionBar: unlock signal from ChatBox SSE done event
+  const handleUnlock = useCallback((types: string[]) => {
+    setUnlockedButtons(prev => {
+      const next = [...prev]
+      for (const t of types as GenerateType[]) {
+        if (!next.includes(t)) next.push(t)
+      }
+      return next
+    })
+    // Remove from stale if re-unlocked
+    setStaleButtons(prev => prev.filter(t => !types.includes(t)))
+  }, [])
+
+  // ActionBar: stale signal from ChatBox SSE done event
+  const handleStale = useCallback((types: string[]) => {
+    setStaleButtons(prev => {
+      const next = [...prev]
+      for (const t of types as GenerateType[]) {
+        if (!next.includes(t)) next.push(t)
+      }
+      return next
+    })
+  }, [])
+
+  // SSE stream reader for generate endpoints
+  const streamGenerateSSE = useCallback(
+    async (type: GenerateType, convId: string) => {
+      setLoadingButton(type)
+      setLoadingTab(type)
+      setDrawerOpen(true)
+
+      try {
+        const response = await fetch(`/api/v1/generate/${type}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ conversation_id: convId }),
+        })
+
+        if (!response.ok || !response.body) {
+          throw new Error(`HTTP ${response.status}`)
+        }
+
+        const reader = response.body.getReader()
+        const decoder = new TextDecoder()
+        let buffer = ''
+        let accumulatedText = ''
+
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          buffer += decoder.decode(value, { stream: true })
+
+          const parts = buffer.split('\n\n')
+          buffer = parts.pop() ?? ''
+
+          for (const part of parts) {
+            const line = part.trim()
+            if (!line.startsWith('data: ')) continue
+            const jsonStr = line.slice(6)
+            let event: Record<string, unknown>
+            try {
+              event = JSON.parse(jsonStr)
+            } catch {
+              continue
+            }
+
+            if (event.type === 'token') {
+              accumulatedText += (event.content as string)
+              // Update streaming content in drawer
+              if (type === 'costs') {
+                setArtifacts(prev => ({ ...prev, costs: accumulatedText }))
+              } else if (type === 'terraform') {
+                setArtifacts(prev => ({ ...prev, terraform: accumulatedText }))
+              }
+              // Architecture tokens don't update incrementally (JSON parse needed at end)
+
+            } else if (event.type === 'done') {
+              const payload = event.payload as Record<string, unknown>
+              const readyFor = event.ready_for as string[] | undefined
+
+              if (type === 'architecture') {
+                setArtifacts(prev => ({
+                  ...prev,
+                  architecture: payload as unknown as ArchitecturePlanData,
+                }))
+              } else if (type === 'costs') {
+                setArtifacts(prev => ({ ...prev, costs: payload.content as string }))
+              } else if (type === 'terraform') {
+                setArtifacts(prev => ({ ...prev, terraform: payload.content as string }))
+              }
+
+              // Unlock next step
+              if (readyFor && readyFor.length > 0) {
+                handleUnlock(readyFor)
+              }
+              // Remove this type from stale
+              setStaleButtons(prev => prev.filter(t => t !== type))
+
+            } else if (event.type === 'error') {
+              toast({
+                title: `${type} generation failed`,
+                description: String(event.message),
+                status: 'error',
+                duration: 5000,
+                isClosable: true,
+                position: 'bottom',
+              })
+            }
+          }
+        }
+      } catch (err) {
+        toast({
+          title: `Failed to generate ${type}`,
+          description: 'Please try again.',
+          status: 'error',
+          duration: 4000,
+          isClosable: true,
+          position: 'bottom',
+        })
+      } finally {
+        setLoadingButton(null)
+        setLoadingTab(null)
+      }
+    },
+    [handleUnlock, toast]
+  )
+
+  const handleGenerate = useCallback(
+    (type: GenerateType) => {
+      if (!activeConvId) return
+      streamGenerateSSE(type, activeConvId)
+    },
+    [activeConvId, streamGenerateSSE]
+  )
+
+  // Reset drawer/artifacts when switching conversation
+  const handleNewConversationWithReset = useCallback(() => {
     const newId = crypto.randomUUID()
     setActiveConvId(newId)
     setPage('chat')
     setClearConfirming(false)
+    setUnlockedButtons([])
+    setStaleButtons([])
+    setArtifacts({})
+    setDrawerOpen(false)
   }, [])
-
-  const hasMessages = chatRef.current?.hasMessages() ?? false
-
-  // Suppress unused toast warning — toast available for future use
-  void toast
 
   return (
     <Flex h="100vh" overflow="hidden" bg="gray.100">
@@ -142,7 +304,7 @@ function App() {
             color="gray.300"
             borderColor="aws.squidLight"
             _hover={{ bg: 'aws.squidLight', color: 'white' }}
-            onClick={handleNewConversation}
+            onClick={handleNewConversationWithReset}
           >
             New conversation
           </Button>
@@ -266,9 +428,9 @@ function App() {
         </Box>
       </Flex>
 
-      {/* Main content — unchanged structure */}
+      {/* Main content — chat + artifact drawer */}
       <Flex flex={1} direction="column" minW={0} overflow="hidden">
-        {/* Top bar — unchanged */}
+        {/* Top bar */}
         <HStack
           as="header"
           h="48px"
@@ -292,17 +454,50 @@ function App() {
           </HStack>
         </HStack>
 
-        <Box as="main" flex={1} overflow="hidden">
-          {page === 'chat' ? (
-            <ChatBox
-              ref={chatRef}
-              conversationId={activeConvId}
-              onSessionUpdate={handleSessionUpdate}
-            />
-          ) : (
-            <KnowledgeBase />
-          )}
-        </Box>
+        {/* Chat + Drawer row */}
+        <Flex flex={1} overflow="hidden">
+          {/* Chat column */}
+          <Flex
+            direction="column"
+            flex={drawerOpen ? '1 1 60%' : '1 1 100%'}
+            minW={0}
+            overflow="hidden"
+            transition="flex 0.25s ease"
+          >
+            {/* ActionBar — only show on chat page */}
+            {page === 'chat' && (
+              <ActionBar
+                unlockedButtons={unlockedButtons}
+                staleButtons={staleButtons}
+                loadingButton={loadingButton}
+                onGenerate={handleGenerate}
+              />
+            )}
+
+            <Box as="main" flex={1} overflow="hidden">
+              {page === 'chat' ? (
+                <ChatBox
+                  ref={chatRef}
+                  conversationId={activeConvId}
+                  onSessionUpdate={handleSessionUpdate}
+                  onUnlock={handleUnlock}
+                  onStale={handleStale}
+                />
+              ) : (
+                <KnowledgeBase />
+              )}
+            </Box>
+          </Flex>
+
+          {/* Artifact Drawer — always mounted, slides in/out */}
+          <ArtifactDrawer
+            isOpen={drawerOpen}
+            unlockedTabs={unlockedButtons}
+            artifacts={artifacts}
+            loadingTab={loadingTab}
+            onClose={() => setDrawerOpen(false)}
+          />
+        </Flex>
       </Flex>
     </Flex>
   )
