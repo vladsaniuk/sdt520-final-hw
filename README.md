@@ -213,6 +213,60 @@ For small tasks that don't belong to a planned phase:
 
 ---
 
+## Project Breakdown
+
+### Task Milestones
+
+**Dev A — Ingestion & RAG**
+
+1. Set up Neo4j vector index and schema initialization on backend startup
+2. Build document ingestion pipeline: upload → parse (PDF/Markdown/text) → chunk → embed with sentence-transformers → store as vector nodes
+3. Wire VectorCypherRetriever into the advisor: query uploaded docs by similarity, inject retrieved context into LLM prompt
+4. Build the Knowledge Base panel: file upload dropzone, real-time WebSocket progress bar, indexed document list with delete
+5. Build the debug panel: RAG retrieval viewer showing what context was injected into each LLM call, live SSE event log
+
+**Dev B — Conversation & Prompt Engineering**
+
+6. Design the prompt system: ADVISOR_PROMPT for initial plans, FOLLOWUP_PROMPT for refinements that delta off prior context, TERRAFORM_FULL_PROMPT for HCL generation
+7. Implement conversation history on the backend: in-memory store keyed by conversation_id, full history injected into every LLM call
+8. Implement structured LLM output: Pydantic ArchitecturePlan model with with_structured_output(), retry on schema violations, cost field coercion
+9. Build multi-turn chat UI: message bubbles, context fill bar showing token usage, diff badges on refined plans, Compact and Clear controls
+10. Build the guided intake flow: multi-step Q&A that collects system requirements before the first LLM call, results passed as structured context to the advisor
+
+**Dev C — Generation, Validation & DevOps**
+
+11. Build the architecture advisor endpoint: async LLM call via OpenRouter, structured response (Mermaid diagram + services + IaC snippet + cost estimate)
+12. Build Terraform generation: POST /approve → LLM generates full valid HCL → terraform validate subprocess → cache and serve by recommendation ID
+13. Build the Terraform approval UI: Approve button on assistant messages, approval status indicator, download .tf file as a Blob
+14. Set up Docker Compose with full health-gated startup: Neo4j → Backend → Frontend, each waiting on the previous service's health endpoint
+15. Build the system prompt inspector: expose assembled prompt + model config via debug endpoint, render in frontend debug drawer
+
+---
+
+### Key Challenges
+
+1. **Structured output parsing brittleness** — The LLM frequently returned JSON wrapped in markdown code fences, with explanation text before/after the JSON block, or violated the schema in subtle ways (e.g. cost as a string `"~$200/mo"` instead of a number). Had to switch from regex/string-split parsing to `with_structured_output()` with a Pydantic model, plus a retry decorator for schema violations.
+
+2. **LLM-generated Mermaid syntax errors** — The model produced structurally invalid Mermaid diagrams: broken arrow syntax, illegal node names with special characters, unclosed brackets, and inconsistent indentation. Required building a targeted `sanitizeMermaid()` pre-processor and catching render errors gracefully in the frontend.
+
+3. **RAG returning empty context on cold start** — Before any documents were uploaded, `VectorCypherRetriever` threw exceptions (no `Document_Chunk` nodes, no populated index), causing every advisor call to 500. Added a try/except cold-start guard that returns `""` when no documents exist so the LLM still responds — just without grounding.
+
+4. **Hardcoded seed data polluting recommendations** — The advisor injected 12 hardcoded AWS service nodes into every LLM system prompt alongside RAG context, meaning the model's output was partially grounded in static boilerplate rather than the user's actual uploaded documents — contradicting the core purpose of the system. Removed the graph query entirely; `combined_context` is now purely vector-retrieved content from uploaded docs.
+
+5. **RAG record serialization format inconsistency** — `neo4j-graphrag` serialized Neo4j `Record` objects into `item.content` as Python repr strings, using either single or double quotes depending on data values. A string like `{'name': "it's here"}` broke naive JSON parsing. Had to write `_parse_record_string()` with a regex that handles both quote styles before content could be injected into the prompt.
+
+6. **Conversation history growing beyond LLM context window** — Multi-turn conversations with large architecture responses accumulated tokens fast. Without a compaction strategy, long sessions hit model context limits and the LLM started truncating or refusing responses. Added `POST /compact` (summarize history to a single system message) and `POST /clear` endpoints, with a context fill-bar in the UI warning users before they hit the limit.
+
+7. **Follow-up prompts triggering fresh plans instead of refinements** — Without explicit instruction, the LLM treated every follow-up message ("make it cheaper", "use ECS instead") as a new architecture request and returned a completely different plan ignoring prior context. Required a dedicated `FOLLOWUP_PROMPT` template that explicitly instructs the model to treat prior turns as the base plan and only apply the requested delta.
+
+8. **Loose LLM cost schema causing deserialization failures** — The model returned cost estimates in inconsistent formats: plain numbers, strings with currency symbols, ranges (`"$100-200"`), or omitted the field entirely. Pydantic validation failed on every third response. Required coercing the cost field at parse time and making it `Optional` with a fallback rather than enforcing a strict numeric type.
+
+9. **Terraform HCL quality from the LLM** — The model generated syntactically plausible but semantically invalid Terraform: missing `required_providers` blocks, hardcoded region strings instead of variables, resource type names that don't exist in the AWS provider. Had to engineer `TERRAFORM_FULL_PROMPT` with explicit structural constraints and run `terraform validate` as a post-generation check with the result surfaced to the user.
+
+10. **Embeddings API vs LLM API mismatch** — The scaffold assumed OpenRouter would handle both chat completions and embeddings under one key. OpenRouter only proxies chat completions — calling `/embeddings` returns a 404. The ingestion pipeline silently failed with no documents ever stored in Neo4j. Resolved by switching to local `sentence-transformers` (`all-MiniLM-L6-v2`, 384-dim) running inside Docker — no second API key required.
+
+---
+
 ## License
 
 MIT
