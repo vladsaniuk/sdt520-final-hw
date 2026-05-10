@@ -105,6 +105,15 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
     return localStorage.getItem('aws_advisor_conv_id') || crypto.randomUUID()
   })
 
+  // Sync internal conversationId when parent switches conversations
+  useEffect(() => {
+    if (externalConvId && externalConvId !== conversationId) {
+      setConversationId(externalConvId)
+      setMessages([])
+      setError(null)
+    }
+  }, [externalConvId]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Context fill tracking
   const [fillPercent, setFillPercent] = useState(0)
   const [warningDismissed, setWarningDismissed] = useState(false)

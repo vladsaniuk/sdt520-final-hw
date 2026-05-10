@@ -67,10 +67,15 @@ function App() {
   const [debugInfo, setDebugInfo] = useState<DebugInfo | null>(null)
   // Load conversations from backend DB on mount for sidebar restore
   useEffect(() => {
+    const lastConvId = localStorage.getItem('aws_advisor_conv_id')
+    // Set active conversation immediately from localStorage so ChatBox
+    // doesn't diverge from App state on first render
+    if (lastConvId) setActiveConvId(lastConvId)
+
     fetch('/api/v1/conversations')
       .then(r => r.json())
       .then((convs: Array<{ id: string; state: string; title: string; updated_at: number }>) => {
-        if (!Array.isArray(convs) || convs.length === 0) return
+        if (!Array.isArray(convs)) return
         const loaded: Session[] = convs.map(c => ({
           id: c.id,
           title: c.title || 'New conversation',
@@ -78,12 +83,16 @@ function App() {
           updatedAt: c.updated_at,
           state: c.state,
         }))
-        setSessions(loaded)
-        // Restore last active conversation
-        const lastConvId = localStorage.getItem('aws_advisor_conv_id')
-        if (lastConvId && loaded.some(s => s.id === lastConvId)) {
-          setActiveConvId(lastConvId)
-        } else if (loaded.length > 0) {
+        setSessions(prev => {
+          // Merge: keep any sessions ChatBox already reported, add DB ones
+          const merged = [...loaded]
+          for (const s of prev) {
+            if (!merged.find(m => m.id === s.id)) merged.push(s)
+          }
+          return merged
+        })
+        // Only switch active conversation if nothing is set yet
+        if (!lastConvId && loaded.length > 0) {
           setActiveConvId(loaded[0].id)
         }
       })
