@@ -213,6 +213,17 @@ async def list_conversations():
     return convs
 
 
+@router.get("/conversations/{conv_id}/messages")
+async def get_conversation_messages(conv_id: str):
+    """Return messages for a conversation so the frontend can restore chat history."""
+    history = await asyncio.to_thread(db.get_history, conv_id)
+    return [
+        {"role": m.type, "content": m.content}
+        for m in history
+        if m.type in ("human", "ai")
+    ]
+
+
 @router.post("/chat/stream")
 async def chat_stream(request: "ChatRequest"):
     """

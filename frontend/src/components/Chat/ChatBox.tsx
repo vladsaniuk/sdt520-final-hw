@@ -125,7 +125,7 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [messages, loading])
 
-  // Restore history from localStorage on mount
+  // Restore history: localStorage first, fall back to backend fetch
   useEffect(() => {
     const storedHistory = localStorage.getItem(`aws_advisor_history_${conversationId}`)
     if (storedHistory) {
@@ -137,14 +137,28 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
         }))
         setMessages(restored)
         setFillPercent(estimateFillPercent(restored, ''))
-        // Re-hydrate sidebar — stored timestamp or now as fallback
         const storedUpdatedAt = localStorage.getItem(`aws_advisor_updated_${conversationId}`)
         const updatedAt = storedUpdatedAt ? parseInt(storedUpdatedAt, 10) : Date.now()
         onSessionUpdate?.(conversationId, restored, updatedAt)
+        return
       } catch {
-        // Corrupt storage — start fresh
+        // Corrupt storage — fall through to backend fetch
       }
     }
+    // No localStorage — fetch from backend
+    fetch(`/api/v1/conversations/${conversationId}/messages`)
+      .then(r => r.ok ? r.json() : [])
+      .then((rows: Array<{ role: string; content: string }>) => {
+        if (!Array.isArray(rows) || rows.length === 0) return
+        const restored: Message[] = rows.map(m => ({
+          role: m.role === 'human' ? 'user' : 'assistant',
+          content: m.content,
+        }))
+        setMessages(restored)
+        setFillPercent(estimateFillPercent(restored, ''))
+        onSessionUpdate?.(conversationId, restored, Date.now())
+      })
+      .catch(() => {/* backend unavailable — start fresh */})
   }, [conversationId, onSessionUpdate])
 
   // Live pre-send context fill estimation
