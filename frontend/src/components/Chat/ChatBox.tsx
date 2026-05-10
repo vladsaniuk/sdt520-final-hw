@@ -167,11 +167,15 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
         }))
         setMessages(restored)
         setFillPercent(estimateFillPercent(restored, ''))
+        // Re-hydrate sidebar — stored timestamp or now as fallback
+        const storedUpdatedAt = localStorage.getItem(`aws_advisor_updated_${conversationId}`)
+        const updatedAt = storedUpdatedAt ? parseInt(storedUpdatedAt, 10) : Date.now()
+        onSessionUpdate?.(conversationId, restored, updatedAt)
       } catch {
         // Corrupt storage — start fresh
       }
     }
-  }, [conversationId])
+  }, [conversationId, onSessionUpdate])
 
   // Live pre-send context fill estimation
   useEffect(() => {
@@ -258,14 +262,16 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
 
       // Persist to localStorage
       const newConvId = data.conversation_id || conversationId
+      const updatedAt = Date.now()
       localStorage.setItem('aws_advisor_conv_id', newConvId)
       localStorage.setItem(
         `aws_advisor_history_${newConvId}`,
         JSON.stringify(serializeHistory(finalMessages))
       )
+      localStorage.setItem(`aws_advisor_updated_${newConvId}`, String(updatedAt))
 
       // Notify App.tsx of session update
-      onSessionUpdate?.(newConvId, finalMessages, Date.now())
+      onSessionUpdate?.(newConvId, finalMessages, updatedAt)
 
     } catch {
       setError('Something went wrong — please try again.')
@@ -317,6 +323,7 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
     setWarningDismissed(false)
     setClearConfirming(false)
     localStorage.removeItem(`aws_advisor_history_${conversationId}`)
+    localStorage.removeItem(`aws_advisor_updated_${conversationId}`)
     onSessionUpdate?.(conversationId, [], Date.now())
   }, [conversationId, onSessionUpdate])
 
