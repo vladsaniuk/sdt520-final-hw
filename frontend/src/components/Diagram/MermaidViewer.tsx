@@ -19,8 +19,14 @@ export const MermaidViewer: React.FC<MermaidViewerProps> = ({ definition }) => {
   useEffect(() => {
     if (containerRef.current && definition) {
       containerRef.current.removeAttribute('data-processed')
-      containerRef.current.innerHTML = definition
-      mermaid.run({ nodes: [containerRef.current] })
+      // Use textContent (not innerHTML) so Mermaid source is not HTML-parsed.
+      // HTML special chars like --> and > in arrows would otherwise be corrupted.
+      containerRef.current.textContent = definition
+      mermaid.run({ nodes: [containerRef.current] }).catch(() => {
+        if (containerRef.current) {
+          containerRef.current.textContent = '⚠ Could not render diagram — invalid Mermaid syntax'
+        }
+      })
     }
   }, [definition])
 

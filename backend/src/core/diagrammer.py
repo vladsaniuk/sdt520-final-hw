@@ -11,7 +11,7 @@ class DiagramGenerator:
             return match.group(1).strip()
         
         # Fallback: check if text itself looks like mermaid code
-        if "graph TD" in text or "graph LR" in text:
+        if "graph TD" in text or "graph LR" in text or "flowchart TD" in text or "flowchart LR" in text:
             return text.strip()
             
         return "graph TD\n    A[User Request] --> B[Architecture Recommendation]"
