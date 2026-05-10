@@ -66,15 +66,9 @@ Services start in order: Neo4j → Backend → Frontend. Wait for all three to b
 - **API docs** → [http://localhost:8000/docs](http://localhost:8000/docs)
 - **Neo4j browser** → [http://localhost:7474](http://localhost:7474)
 
-### 4. Seed the knowledge base (optional but recommended)
+### 4. Upload your knowledge base
 
-The advisor ships with a baseline set of AWS service nodes. To seed them:
-
-```bash
-curl -X POST http://localhost:8000/api/v1/seed
-```
-
-Upload your own docs via the **Knowledge Base** panel in the UI.
+Open the **Knowledge Base** panel in the UI and upload your own best-practice docs (PDF, Markdown, or plain text). The advisor grounds every recommendation in these documents — the more relevant your docs, the sharper the output.
 
 ---
 
@@ -215,7 +209,7 @@ For small tasks that don't belong to a planned phase:
 | 2.1 | UI Polish | ✅ Complete |
 | 3 | Multi-Turn Chat | ✅ Verified |
 | 4 | Terraform Download | ✅ Complete |
-| 5 | Docker Polish | ⬜ Not started |
+| 5 | Docker Polish | ✅ Complete |
 
 ---
 
