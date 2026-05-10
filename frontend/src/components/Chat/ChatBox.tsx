@@ -45,12 +45,13 @@ interface ServiceItem {
 }
 
 interface Message {
-  role: 'user' | 'assistant' | 'error'
+  role: 'user' | 'assistant' | 'error' | 'approval'
   content: string
   diagram?: string
   iac?: IaC[]
   costs?: Costs
   services?: ServiceItem[]
+  recommendationId?: string
 }
 
 interface StoredMessage {
@@ -143,6 +144,12 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
   const [warningDismissed, setWarningDismissed] = useState(false)
   const [isCompacting, setIsCompacting] = useState(false)
   const [clearConfirming, setClearConfirming] = useState(false)
+
+  // Approval state (D-06)
+  const [approvedRecommendationId, setApprovedRecommendationId] = useState<string | null>(null)
+  const [approvedHcl, setApprovedHcl] = useState<string | null>(null)
+  const [approvalStatus, setApprovalStatus] = useState<'idle' | 'pending' | 'done' | 'error'>('idle')
+  const [validationWarning, setValidationWarning] = useState<boolean>(false)
 
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -244,6 +251,7 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
         iac: data.iac,
         costs: data.costs,
         services: data.services,
+        recommendationId: data.recommendation_id,
       }
       const finalMessages = [...updatedMessages, assistantMessage]
       setMessages(finalMessages)
@@ -318,15 +326,66 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
     hasMessages: () => messages.length > 0,
   }), [handleCompact, handleClear, messages.length])
 
-  const showDownloadToast = () => {
-    toast({
-      title: 'Coming soon',
-      description: 'Terraform download will be available in Phase 5.',
-      status: 'info',
-      duration: 3000,
-      isClosable: true,
-      position: 'bottom',
-    })
+  const handleApprove = async (recommendationId: string) => {
+    // Reset previous approval state — only one plan approved at a time (D-01)
+    setApprovedRecommendationId(recommendationId)
+    setApprovalStatus('pending')
+    setApprovedHcl(null)
+    setValidationWarning(false)
+
+    // Insert approval status bubble into messages thread (D-21: new bubble per action)
+    // Filter out any existing approval bubble first — only one plan approved at a time (D-01)
+    setMessages(prev => [
+      ...prev.filter(m => m.role !== 'approval'),
+      { role: 'approval', content: 'Generating Terraform config…' },
+    ])
+
+    try {
+      const res = await fetch(`/api/v1/chat/${conversationId}/approve`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ recommendation_id: recommendationId }),
+      })
+      if (!res.ok) throw new Error(`Approve failed: ${res.status}`)
+      const data = await res.json()
+      setApprovedHcl(data.hcl)
+      setApprovalStatus('done')
+      // valid=false (not null) means terraform found syntax errors
+      setValidationWarning(data.valid === false)
+      if (data.valid === false && data.validation_errors?.length > 0) {
+        toast({
+          title: 'Terraform config generated with warnings',
+          description: data.validation_errors.slice(0, 2).join('; '),
+          status: 'warning',
+          duration: 6000,
+          isClosable: true,
+          position: 'bottom',
+        })
+      }
+    } catch {
+      setApprovalStatus('error')
+      toast({
+        title: 'Approval failed',
+        description: 'Could not generate Terraform config. Please try again.',
+        status: 'error',
+        duration: 4000,
+        isClosable: true,
+        position: 'bottom',
+      })
+    }
+  }
+
+  const handleDownload = () => {
+    if (!approvedHcl || !approvedRecommendationId) return
+    const blob = new Blob([approvedHcl], { type: 'text/plain' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `architecture-${approvedRecommendationId.slice(0, 8)}.tf`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    URL.revokeObjectURL(url)
   }
 
   return (
@@ -423,6 +482,58 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
                 )
               }
 
+              // Approval status bubble (D-05) — role 'approval' inserted by handleApprove
+              if (msg.role === 'approval') {
+                return (
+                  <Flex key={i} gap={3} justify="flex-start">
+                    <Flex
+                      w={8} h={8} borderRadius="full" bg="aws.orange"
+                      align="center" justify="center" flexShrink={0} mt={1}
+                      boxShadow="sm"
+                    >
+                      <Icon as={MdBolt} color="aws.squid" boxSize={4} />
+                    </Flex>
+                    <Box
+                      bg="white"
+                      border="1px solid"
+                      borderColor="gray.200"
+                      borderRadius="2xl"
+                      borderTopLeftRadius="sm"
+                      px={4} py={3}
+                      boxShadow="sm"
+                    >
+                      {approvalStatus === 'pending' && (
+                        <HStack spacing={2}>
+                          <Spinner size="xs" color="gray.400" />
+                          <Text fontSize="sm" color="gray.500">Generating Terraform config…</Text>
+                        </HStack>
+                      )}
+                      {approvalStatus === 'done' && (
+                        <VStack align="start" spacing={2}>
+                          <Button
+                            size="sm"
+                            colorScheme="green"
+                            onClick={handleDownload}
+                          >
+                            Download .tf
+                          </Button>
+                          {validationWarning && (
+                            <Text fontSize="xs" color="orange.500">
+                              Config generated with warnings — review before deploying
+                            </Text>
+                          )}
+                        </VStack>
+                      )}
+                      {approvalStatus === 'error' && (
+                        <Text fontSize="sm" color="red.500">
+                          Generation failed. Please try again.
+                        </Text>
+                      )}
+                    </Box>
+                  </Flex>
+                )
+              }
+
               return (
                 <Flex key={i} gap={3} justify={msg.role === 'user' ? 'flex-end' : 'flex-start'}>
                   {msg.role === 'assistant' && (
@@ -494,6 +605,25 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
                       </HStack>
                     )}
 
+                    {/* Approve/Approved button — one plan approved at a time (D-01, D-05) */}
+                    {msg.role === 'assistant' && msg.recommendationId && (
+                      <HStack mt={2}>
+                        {approvedRecommendationId === msg.recommendationId ? (
+                          <Tag colorScheme="green" size="sm">✓ Approved</Tag>
+                        ) : (
+                          <Button
+                            size="xs"
+                            variant="outline"
+                            colorScheme="green"
+                            onClick={() => handleApprove(msg.recommendationId!)}
+                            isDisabled={approvalStatus === 'pending'}
+                          >
+                            Approve
+                          </Button>
+                        )}
+                      </HStack>
+                    )}
+
                     {msg.role === 'assistant' && (
                       <>
                         {msg.diagram && <MermaidViewer definition={msg.diagram} />}
@@ -514,9 +644,10 @@ export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
                                 color="aws.squid"
                                 fontWeight="bold"
                                 _hover={{ bg: 'aws.orangeDark' }}
-                                onClick={showDownloadToast}
+                                onClick={() => msg.recommendationId && handleApprove(msg.recommendationId)}
+                                isDisabled={approvalStatus === 'pending' || !msg.recommendationId}
                               >
-                                Download .tf
+                                {approvedRecommendationId === msg.recommendationId ? 'Approved ✓' : 'Approve & Download'}
                               </Button>
                             </HStack>
                             <Box p={4}>
