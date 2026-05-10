@@ -138,7 +138,10 @@ function App() {
         }
         if (arts.costs) restored.costs = arts.costs
         if (arts.terraform) restored.terraform = arts.terraform
-        if (Object.keys(restored).length > 0) setArtifacts(restored)
+        if (Object.keys(restored).length > 0) {
+          setArtifacts(restored)
+          setDrawerOpen(true)
+        }
       })
       .catch(() => {})
   }, [activeConvId])
