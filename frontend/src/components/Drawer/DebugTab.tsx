@@ -247,15 +247,9 @@ export const DebugTab: React.FC<DebugTabProps> = ({ events, info }) => {
       {/* ── Section 3: Event Log ── */}
       <Box flex={1} overflowY="auto" bg="gray.900" fontFamily="monospace">
         <Box px={2} pt={2} pb={1} borderBottom="1px solid" borderColor="gray.800" flexShrink={0}>
-          <HStack spacing={2}>
-            <Text fontSize="10px" fontWeight="bold" color="gray.500" textTransform="uppercase" letterSpacing="widest">
-              Event Log
-            </Text>
-            <Badge colorScheme="gray" fontSize="11px">{totalDisplayed} items</Badge>
-            {tokenCount > 0 && (
-              <Badge colorScheme="gray" fontSize="11px" variant="outline">{tokenCount} tokens grouped</Badge>
-            )}
-          </HStack>
+          <Text fontSize="10px" fontWeight="bold" color="gray.500" textTransform="uppercase" letterSpacing="widest">
+            Event Log
+          </Text>
         </Box>
         {items.length === 0 ? (
           <Flex align="center" justify="center" py={8}>
