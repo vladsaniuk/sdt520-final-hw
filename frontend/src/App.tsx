@@ -104,7 +104,6 @@ function App() {
     setUnlockedButtons([])
     setStaleButtons([])
     setArtifacts({})
-    setDrawerOpen(false)
     setLoadingButton(null)
     setLoadingTab(null)
     setDebugEvents([])
@@ -333,7 +332,6 @@ function App() {
     setUnlockedButtons([])
     setStaleButtons([])
     setArtifacts({})
-    setDrawerOpen(false)
   }, [])
 
   return (
