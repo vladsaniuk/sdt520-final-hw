@@ -15,7 +15,7 @@ from langchain_openai import ChatOpenAI
 from src.core.extractor import RequirementExtractor
 from src.core.advisor import ArchitectureAdvisor
 from src.core.models import ArchitecturePlan, ServiceDetail, StructuredOutputError
-from src.core.prompts import ADVISOR_PROMPT, COMPACT_PROMPT, TERRAFORM_FULL_PROMPT, GATHER_PROMPT
+from src.core.prompts import ADVISOR_PROMPT, COMPACT_PROMPT, TERRAFORM_FULL_PROMPT, GATHER_PROMPT, FOLLOWUP_PROMPT
 from src.db import database as db
 
 router = APIRouter()
@@ -321,9 +321,9 @@ async def chat_stream(request: "ChatRequest"):
 
             else:
                 # presenting / architecture_ready / complete — conversational follow-up
-                # Use GATHER_PROMPT so AI continues in advisory mode (no inline arch generation)
+                # Use FOLLOWUP_PROMPT (no ready_for signal, stale signal instead)
                 conv_messages: List[BaseMessage] = [
-                    SystemMessage(content=GATHER_PROMPT),
+                    SystemMessage(content=FOLLOWUP_PROMPT),
                     *history,
                     HumanMessage(content=request.message),
                 ]
@@ -736,6 +736,7 @@ async def debug_info():
         },
         "prompts": {
             "gather": GATHER_PROMPT,
+            "followup": FOLLOWUP_PROMPT,
             "advisor": ADVISOR_PROMPT.template if hasattr(ADVISOR_PROMPT, "template") else str(ADVISOR_PROMPT),
             "terraform": TERRAFORM_FULL_PROMPT,
         },
