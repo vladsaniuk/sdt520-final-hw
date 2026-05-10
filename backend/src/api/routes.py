@@ -1,13 +1,19 @@
 import uuid
 import json
+import os
+import tempfile
+import shutil
 import asyncio
+from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from typing import Optional, List, Dict
 from langchain_core.messages import BaseMessage, HumanMessage, AIMessage, SystemMessage
+from langchain_openai import ChatOpenAI
 from src.core.extractor import RequirementExtractor
 from src.core.advisor import ArchitectureAdvisor
 from src.core.models import ArchitecturePlan, ServiceDetail, StructuredOutputError
+from src.core.prompts import ADVISOR_PROMPT, COMPACT_PROMPT, TERRAFORM_FULL_PROMPT
 
 router = APIRouter()
 extractor = RequirementExtractor()
@@ -17,6 +23,10 @@ advisor = ArchitectureAdvisor()
 # Lost on container restart — v2 persistence is deferred (per D-13).
 # Thread-safe for demo: FastAPI single-threaded asyncio event loop, no concurrent writes.
 _conversation_history: Dict[str, List[BaseMessage]] = {}
+
+# In-memory cache of generated Terraform HCL keyed by recommendation_id.
+# Same pattern as _conversation_history — lost on container restart (acceptable for demo, per D-03).
+_terraform_cache: Dict[str, str] = {}
 
 
 def _deserialize_history(raw: List[dict]) -> List[BaseMessage]:
@@ -76,6 +86,114 @@ class CompactResponse(BaseModel):
 class ClearResponse(BaseModel):
     conversation_id: str
     message: str
+
+
+class ApproveRequest(BaseModel):
+    recommendation_id: str
+
+
+class ApproveResponse(BaseModel):
+    recommendation_id: str
+    hcl: str
+    valid: bool | None   # None = Terraform CLI not installed (graceful fallback, D-04)
+    validation_errors: List[str]
+
+
+def _strip_code_fences(content: str) -> str:
+    """Strip markdown code fences from LLM HCL output. Reuses pattern from terraform.py lines 20-27."""
+    if "```hcl" in content:
+        content = content.split("```hcl")[1].split("```")[0]
+    elif "```terraform" in content:
+        content = content.split("```terraform")[1].split("```")[0]
+    elif "```" in content:
+        content = content.split("```")[1].split("```")[0]
+    return content.strip()
+
+
+async def _generate_full_terraform(history: List[BaseMessage]) -> str:
+    """
+    Generate full deployment-ready Terraform HCL from conversation history.
+    New async LLM call — does NOT use TerraformGenerator (sync, D-02).
+    Uses last 10 history turns to stay within context window.
+    """
+    llm = ChatOpenAI(
+        model="openai/gpt-4o",
+        openai_api_key=os.getenv("LLM_API_KEY"),
+        openai_api_base="https://openrouter.ai/api/v1",
+    )
+    messages: List[BaseMessage] = [
+        SystemMessage(content=TERRAFORM_FULL_PROMPT),
+        *history[-10:],
+        HumanMessage(content="Generate the complete Terraform configuration now."),
+    ]
+    result = await llm.ainvoke(messages)
+    raw = result.content or ""
+    return _strip_code_fences(raw)
+
+
+async def _validate_terraform(hcl: str, rec_id: str) -> tuple[bool | None, list[str]]:
+    """
+    Validate HCL via `terraform init -backend=false` then `terraform validate -json`.
+    Returns (valid, error_messages).
+    valid=None if Terraform CLI not installed (graceful fallback for dev env, D-04).
+    Never raises — all errors return (None, []).
+
+    IMPORTANT: Uses tempfile.mkdtemp() NOT /tmp/{id}.tf — terraform init needs
+    a full directory for .terraform/ subdirectory and .terraform.lock.hcl.
+    """
+    if not shutil.which("terraform"):
+        print("[Approve] terraform CLI not found — skipping validation (D-04 fallback)")
+        return None, []
+
+    tmpdir = tempfile.mkdtemp(prefix=f"tf_{rec_id[:8]}_")
+    try:
+        tf_file = Path(tmpdir) / "main.tf"
+        tf_file.write_text(hcl)
+
+        # Step 1: terraform init — downloads provider schemas (needed for validate)
+        init_proc = await asyncio.create_subprocess_exec(
+            "terraform", "init", "-backend=false", "-input=false",
+            cwd=tmpdir,
+            stdout=asyncio.subprocess.DEVNULL,
+            stderr=asyncio.subprocess.DEVNULL,
+        )
+        try:
+            await asyncio.wait_for(init_proc.wait(), timeout=60.0)
+        except asyncio.TimeoutError:
+            print(f"[Approve] terraform init timed out for {rec_id}")
+            return None, []
+
+        if init_proc.returncode != 0:
+            print(f"[Approve] terraform init failed (exit {init_proc.returncode}) for {rec_id}")
+            return None, []
+
+        # Step 2: terraform validate -json — parse structured output
+        val_proc = await asyncio.create_subprocess_exec(
+            "terraform", "validate", "-json",
+            cwd=tmpdir,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        try:
+            stdout, _ = await asyncio.wait_for(val_proc.communicate(), timeout=30.0)
+        except asyncio.TimeoutError:
+            print(f"[Approve] terraform validate timed out for {rec_id}")
+            return None, []
+
+        result = json.loads(stdout.decode())
+        valid = result.get("valid", False)
+        errors = [
+            d["summary"]
+            for d in result.get("diagnostics", [])
+            if d.get("severity") == "error"
+        ]
+        return valid, errors
+
+    except Exception as e:
+        print(f"[Approve] Terraform validation error for {rec_id}: {e}")
+        return None, []
+    finally:
+        shutil.rmtree(tmpdir, ignore_errors=True)
 
 
 @router.post("/chat", response_model=ChatResponse)
@@ -185,4 +303,41 @@ async def clear_conversation(conversation_id: str):
     return ClearResponse(
         conversation_id=conversation_id,
         message="Conversation history cleared.",
+    )
+
+
+@router.post("/chat/{conversation_id}/approve", response_model=ApproveResponse)
+async def approve_plan(conversation_id: str, request: ApproveRequest):
+    """
+    Generate and validate a full Terraform HCL config for the approved plan.
+
+    Two-step process (D-04):
+    1. LLM generates full HCL from conversation history + TERRAFORM_FULL_PROMPT
+    2. terraform validate subprocess checks for syntax errors
+
+    Cache (D-03): If recommendation_id already in _terraform_cache, returns cached HCL
+    (re-approval is idempotent — no duplicate LLM calls).
+
+    Response: {recommendation_id, hcl, valid, validation_errors}
+    - valid=True/False: terraform validate result
+    - valid=None: terraform CLI not installed (dev env fallback)
+    - validation_errors: list of error summary strings from terraform diagnostics
+    HTTP 200 always — even on validation failure (frontend shows warning toast, D-05).
+    """
+    rec_id = request.recommendation_id
+    history = _conversation_history.get(conversation_id, [])
+
+    # Check cache first — idempotent re-approval
+    if rec_id in _terraform_cache:
+        hcl = _terraform_cache[rec_id]
+    else:
+        hcl = await _generate_full_terraform(history)
+        _terraform_cache[rec_id] = hcl
+
+    valid, errors = await _validate_terraform(hcl, rec_id)
+    return ApproveResponse(
+        recommendation_id=rec_id,
+        hcl=hcl,
+        valid=valid,
+        validation_errors=errors,
     )

@@ -65,3 +65,21 @@ Produce a concise summary of the conversation so far, covering:
 This summary will replace the conversation history as the system context for future turns.
 Keep it under 500 words. Preserve all specific AWS service names, decisions, and constraints.
 Do not include pleasantries — only architectural facts."""
+
+# Terraform Full Generation Prompt: Expands iac_snippet preview into complete deployable HCL
+# Plain string, not PromptTemplate — no template variables; context comes from message history.
+TERRAFORM_FULL_PROMPT = """You are a Terraform expert. Based on the AWS architecture conversation above, generate a COMPLETE, deployment-ready Terraform HCL configuration.
+
+The configuration MUST include:
+1. terraform block with required_providers (AWS provider, version ~> 5.0)
+2. provider "aws" block with region variable
+3. variable blocks for configurable values (region, environment, etc.)
+4. All resource blocks for the recommended AWS services
+5. output blocks exposing key resource ARNs and endpoints
+
+Requirements:
+- Use Terraform AWS provider version ~> 5.0
+- Follow AWS tagging best practices (Name, Environment tags on all resources)
+- Use least-privilege IAM policies
+- Output ONLY valid HCL — no markdown, no explanations, no code fences
+- The configuration must be syntactically valid and pass `terraform validate`"""
