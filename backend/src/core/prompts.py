@@ -31,7 +31,7 @@ Context (AWS services, Well-Architected pillars, relevant documentation):
 
 Respond with a JSON object matching the ArchitecturePlan schema:
 - summary: 2-3 sentences describing the overall architecture approach
-- diagram: a valid Mermaid.js flowchart (start with "flowchart TD") showing service relationships
+- diagram: a valid Mermaid.js flowchart — start with "flowchart TD", use short alphanumeric node IDs (no spaces), put node labels inside square brackets with NO parentheses or special characters (e.g. use A[ECS Fargate] not A[ECS Fargate (Containers)]), connect with --> arrows
 - services: list of selected AWS services, each with name, description of its role, and rationale for choosing it over alternatives
 - iac_snippet: Terraform HCL for the core infrastructure (provider block + 2-4 key resource definitions)
 - cost_estimate: estimated monthly USD costs with per-service breakdown (mark is_calculated: false — these are LLM estimates)

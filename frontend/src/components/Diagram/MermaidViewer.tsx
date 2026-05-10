@@ -9,6 +9,25 @@ mermaid.initialize({
   securityLevel: 'loose',
 })
 
+/**
+ * Sanitize LLM-generated Mermaid syntax to avoid common parse errors.
+ * LLMs frequently include parentheses inside square-bracket node labels
+ * (e.g. [ECS Fargate (Containers)]) which breaks Mermaid's parser because
+ * ( starts a shape definition. Strip them from inside [...] labels only.
+ * Also strip double-quotes inside labels which can break string parsing.
+ */
+function sanitizeMermaid(definition: string): string {
+  return definition
+    // Remove ( ) inside square-bracket labels: [label (note)] → [label note]
+    .replace(/\[([^\]]*)\]/g, (_match, inner: string) =>
+      '[' + inner.replace(/[()]/g, '').trim() + ']'
+    )
+    // Remove stray double-quotes inside labels that break the parser
+    .replace(/\[([^\]]*)\]/g, (_match, inner: string) =>
+      '[' + inner.replace(/"/g, "'") + ']'
+    )
+}
+
 interface MermaidViewerProps {
   definition: string
 }
@@ -21,7 +40,7 @@ export const MermaidViewer: React.FC<MermaidViewerProps> = ({ definition }) => {
       containerRef.current.removeAttribute('data-processed')
       // Use textContent (not innerHTML) so Mermaid source is not HTML-parsed.
       // HTML special chars like --> and > in arrows would otherwise be corrupted.
-      containerRef.current.textContent = definition
+      containerRef.current.textContent = sanitizeMermaid(definition)
       mermaid.run({ nodes: [containerRef.current] }).catch(() => {
         if (containerRef.current) {
           containerRef.current.textContent = '⚠ Could not render diagram — invalid Mermaid syntax'
