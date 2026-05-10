@@ -1,111 +1,172 @@
 # External Integrations
 
-**Analysis Date:** 2025-01-24
+**Analysis Date:** 2025-07-15
 
-## APIs & External Services
+## APIs & Services
 
-**LLM Provider:**
-- OpenRouter (`https://openrouter.ai/api/v1`) - Routes requests to OpenAI GPT-4o
-  - SDK/Client: `langchain-openai` (`ChatOpenAI` with custom `openai_api_base`)
-  - Auth: `LLM_API_KEY` env var
-  - Used in: `backend/src/core/extractor.py`, `backend/src/core/advisor.py`
-  - Model: `openai/gpt-4o` (configured as default)
+### LLM Provider — OpenRouter
+- **Service:** OpenRouter (`https://openrouter.ai/api/v1`)
+- **Purpose:** Routes chat completions to OpenAI GPT-4o. Acts as OpenAI-compatible proxy.
+- **Model:** `openai/gpt-4o` (hardcoded in `backend/src/core/advisor.py` L105 and `backend/src/api/routes.py` L75)
+- **SDK/Client:** `langchain-openai` — `ChatOpenAI(openai_api_base="https://openrouter.ai/api/v1")`
+- **Auth env var:** `LLM_API_KEY` → passed as `openai_api_key` parameter
+- **Used in:**
+  - `backend/src/core/advisor.py` — `ArchitectureAdvisor` class (GraphRAG + structured output)
+  - `backend/src/api/routes.py` — `_make_llm()`, `_generate_full_terraform()`, streaming chat
+- **Call patterns:**
+  - `llm.astream(messages)` — SSE token streaming (`/chat/stream` endpoint)
+  - `llm.ainvoke(messages)` — non-streaming (`/compact`, Terraform generation)
+  - `llm.with_structured_output(ArchitecturePlan, method="json_mode")` — structured JSON (`/chat`)
 
-**AWS Services:**
-- AWS Pricing API (`us-east-1`) - Fetches on-demand pricing for AWS services (EC2, etc.)
-  - SDK/Client: `boto3` (`backend/src/services/pricing.py`)
-  - Auth: Standard AWS credential chain (env vars / IAM role — no explicit key in code)
-  - Note: Results are file-cached under `data/cache/pricing/`
+### AWS Pricing API
+- **Service:** AWS Pricing API (`us-east-1` region)
+- **Purpose:** On-demand cost data for AWS services
+- **SDK/Client:** `boto3` — `backend/src/services/pricing.py`
+- **Auth:** Standard AWS credential chain (env vars / instance profile — no explicit key in code)
+- **Note:** Results are file-cached under `data/cache/pricing/` to avoid repeated API calls
 
 ## Data Storage
 
-**Databases:**
-- **Neo4j 5.26.0** (Graph Database) — Primary knowledge store for AWS services, Well-Architected pillars, and document chunks
-  - Connection: `NEO4J_URI` env var (default: `bolt://localhost:7687`)
-  - Auth: `NEO4J_USER` / `NEO4J_PASSWORD` env vars
-  - Client: `neo4j` Python driver (`backend/src/services/knowledge_base.py`), `langchain-community` `Neo4jGraph` (`backend/src/core/advisor.py`)
-  - Features used: Vector index (`aws_document_chunks`, 1536-dim cosine), APOC plugin, GDS plugin
-  - Docker image: `neo4j:5.26.0` with `NEO4J_PLUGINS=["apoc", "gds"]`
-  - Data volume: `./data/neo4j`
+### Neo4j 5.26.0 — Knowledge Graph
+- **Role:** Primary knowledge store for GraphRAG. Contains AWS service relationships, Well-Architected pillars, document chunks from uploaded PDFs, and architecture patterns.
+- **Connection env var:** `NEO4J_URI` (default: `bolt://localhost:7687`)
+- **Auth env vars:** `NEO4J_USER` (default: `neo4j`), `NEO4J_PASSWORD`
+- **Clients:**
+  - `neo4j.GraphDatabase.driver()` — direct driver in `backend/src/services/knowledge_base.py` and `backend/src/core/advisor.py` (for `VectorCypherRetriever`)
+  - `langchain_neo4j.Neo4jGraph` — in `ArchitectureAdvisor.__init__()` for Cypher queries
+  - `neo4j_graphrag.retrievers.VectorCypherRetriever` — vector similarity search
+- **Node types:** `AWS_Service`, `WellArchitected_Pillar`, `Document_Chunk`, `KnowledgeDocument`, `Architecture_Pattern`
+- **Relationships:** `(:AWS_Service)-[:ALIGNS_WITH]->(:WellArchitected_Pillar)`, `(:Document_Chunk)-[:PART_OF]->(:KnowledgeDocument)`
+- **Vector index:** `aws_document_chunks` — 384-dim cosine similarity, on `Document_Chunk.embedding`
+- **Schema init:** `backend/src/services/knowledge_base.py` `initialize_schema()` — drops and recreates index, creates uniqueness constraints
+- **Docker volume:** `./data/neo4j:/data`
+- **⚠️ Driver version:** Must use `neo4j` Python driver 5.x. Do NOT upgrade to 6.x.
 
-- **PostgreSQL** (Relational Database) — Models defined for workloads, recommendations, IaC snippets, cost profiles
-  - Connection: Not yet wired (no `DATABASE_URL` in `.env.example`; `psycopg2-binary` installed but no connection string configured)
-  - ORM: SQLAlchemy (`backend/src/models/workload.py`)
-  - Models: `Workload`, `Recommendation`, `IaCSnippet`, `CostProfile`
-  - Status: Schema defined but PostgreSQL service not in `docker-compose.yml` — database not yet integrated at runtime
+### SQLite — Conversation Persistence
+- **Role:** Stores conversation state, message history, and generated artifacts between requests.
+- **File path:** `/app/data/advisor.db` (inside backend container on `sqlite_data` Docker volume)
+- **Implementation:** `backend/src/db/database.py` — raw `sqlite3` module, no ORM
+- **Tables:**
+  - `conversations(id, state, created_at, updated_at)` — state machine: `gathering` → `architecture_ready` → `complete`
+  - `messages(id, conversation_id, role, content, created_at)` — roles: `human`, `ai`, `system`
+  - `artifacts(id, conversation_id, artifact_type, content, created_at)` — types: `architecture`, `costs`, `terraform`
+- **Access pattern:** All DB calls are sync; wrapped in `asyncio.to_thread()` in route handlers to avoid blocking the event loop
 
-**File Storage:**
-- Local filesystem — Pricing API cache stored at `data/cache/pricing/` (JSON files)
-- Neo4j data volumes mounted at `./data/neo4j`
+### Local Filesystem — Embeddings & Logs
+- **Sentence-transformer model cache:** Downloaded by `sentence-transformers` on first use (Hugging Face cache, inside container)
+- **Pricing cache:** `data/cache/pricing/` (JSON files, host-mounted)
+- **Debug log:** `/logs/debug.jsonl` (host `./logs/` mounted into backend container)
+- **Neo4j import dir:** `./data/neo4j/import` (for bulk CSV ingestion)
 
-**Caching:**
-- Local file cache for AWS pricing responses (`backend/src/services/pricing.py`)
-- No Redis or in-memory cache layer
+## Embedding Pipeline
 
-## Authentication & Identity
+- **Model:** `all-MiniLM-L6-v2` (sentence-transformers, runs locally — no external API call)
+- **Dimensions:** 384 (cosine similarity)
+- **Client:** `neo4j_graphrag.embeddings.SentenceTransformerEmbeddings`
+- **Singleton:** Module-level `_embedder` / `_retriever` in `backend/src/core/advisor.py` — lazy-initialized on first RAG call, reused thereafter
+- **Ingestion path:** `backend/src/services/ingestion.py` — PDF → chunks → embeddings → Neo4j `Document_Chunk` nodes
+- **Retrieval query:**
+  ```cypher
+  MATCH (node)-[:PART_OF]->(doc:KnowledgeDocument)
+  RETURN node.text AS text, doc.filename AS source, score
+  ```
 
-**Auth Provider:**
-- None — No user authentication implemented
-- CORS is open (`allow_origins=["*"]`) in `backend/src/main.py` (noted as demo-only)
+## Terraform Validation (Local CLI)
 
-## LLM / RAG Pipeline
+- **Tool:** Terraform CLI 1.9.5 — installed in `backend/Dockerfile`
+- **Purpose:** Validate LLM-generated HCL before returning it to the user
+- **Flow:** `terraform init -backend=false` (60s timeout) → `terraform validate -json` (30s timeout)
+- **Implementation:** `_validate_terraform()` in `backend/src/api/routes.py`
+- **Graceful fallback:** If `terraform` binary not found (`shutil.which`), returns `valid=None` — does not error
+- **Temp dir:** `tempfile.mkdtemp(prefix="tf_{rec_id[:8]}_")` — cleaned up in `finally` block
 
-**GraphRAG:**
-- Neo4j as knowledge graph (`AWS_Service`, `WellArchitected_Pillar`, `Document_Chunk` nodes)
-- Graph traversal queries via `langchain-community` `Neo4jGraph`
-- Vector similarity search via Neo4j vector index (1536-dim embeddings, cosine similarity)
-- Packages: `neo4j-graphrag`, `langchain-community`
-- Used in: `backend/src/core/advisor.py`
+## Data Flow
 
-**LLM Chains:**
-- `RequirementExtractor` (`backend/src/core/extractor.py`) — NL → structured JSON requirements
-- `ArchitectureAdvisor` (`backend/src/core/advisor.py`) — GraphRAG → architecture advice + Mermaid diagram
-- `DiagramGenerator` (`backend/src/core/diagrammer.py`) — Extracts Mermaid diagram from LLM output
-- `TerraformGenerator` (`backend/src/core/iac/terraform.py`) — LLM → Terraform HCL snippets
-- `CloudFormationGenerator` (`backend/src/core/iac/cloudformation.py`) — LLM → CloudFormation YAML snippets
-- `CostAnalyzer` (`backend/src/core/cost_analyzer.py`) — Cost estimation from advice text + AWS Pricing API
-- `TradeoffAnalyzer` (`backend/src/core/tradeoff_analyzer.py`) — Architecture tradeoff analysis
+```
+User Message (HTTP POST /api/v1/chat/stream)
+    │
+    ▼
+[State Machine Check] ──── db.get_state(conv_id) via SQLite
+    │
+    ├── state="gathering"
+    │       │
+    │       ▼
+    │   GATHER_PROMPT + history → OpenRouter (streaming)
+    │   Detect {"ready_for":["architecture"]} signal
+    │   → db.save_message() → db.set_state("architecture_ready")
+    │   → SSE: token events + done event
+    │
+    └── state="architecture_ready" / "complete"
+            │
+            ▼
+        FOLLOWUP_PROMPT + history → OpenRouter (streaming)
+        → SSE: token events + done event
 
-## Monitoring & Observability
+POST /api/v1/generate/architecture
+    │
+    ▼
+[GraphRAG Context Assembly]
+    ├── Neo4j Cypher: AWS_Service → WellArchitected_Pillar (top 20)
+    └── VectorCypherRetriever: embed query → cosine search → top-5 Document_Chunks
+            (sentence-transformers local, all-MiniLM-L6-v2)
+    │
+    ▼
+ADVISOR_PROMPT.format(context, requirements)
+    + conversation history (from SQLite)
+    → OpenRouter (streaming JSON)
+    → parse ArchitecturePlan (Pydantic, json_mode)
+    → retry once on parse failure
+    → SSE: token events + done(ArchitecturePlan payload)
 
-**Error Tracking:**
-- None configured
+POST /api/v1/chat/{id}/approve
+    │
+    ▼
+_generate_full_terraform(history) → OpenRouter
+    → strip code fences
+    → _validate_terraform() via Terraform CLI
+    → ApproveResponse{hcl, valid, validation_errors}
 
-**Logs:**
-- `print()` statements throughout backend services (e.g., `[Advisor]`, `[Extractor]`, `[KnowledgeBase]` prefixes)
-- No structured logging framework
+Every SSE event also:
+    → _log_event() → /logs/debug.jsonl (appended, one JSON line per event + _ts timestamp)
+```
 
-## CI/CD & Deployment
+## Environment Variables
 
-**Hosting:**
-- Docker Compose (`docker-compose.yml`) — three services: `neo4j`, `backend`, `frontend`
-- No cloud hosting or Kubernetes config detected
+| Variable | Required | Default | Description |
+|---|---|---|---|
+| `LLM_API_KEY` | **Yes** | — | OpenRouter API key. Passed as `openai_api_key` to `ChatOpenAI`. |
+| `NEO4J_PASSWORD` | **Yes** | `password` | Neo4j database password. Set in both `neo4j` and `backend` services. |
+| `NEO4J_URI` | No | `bolt://localhost:7687` | Neo4j Bolt connection URI. Inside Docker: `bolt://neo4j:7687` |
+| `NEO4J_USER` | No | `neo4j` | Neo4j username. Defaulted in code via `os.getenv("NEO4J_USER", "neo4j")` |
+| `ALLOWED_ORIGINS` | No | `*` | CORS allowed origins for FastAPI. Docker Compose default is `*`. |
 
-**CI Pipeline:**
-- `.github/` directory present — CI config likely exists but not explored
-- No deployment scripts at root level
+**Secrets location:** `.env` file at project root (git-ignored). Set before running `docker compose up`.
 
-## Environment Configuration
+**Docker Compose injects:**
+- `LLM_API_KEY=${LLM_API_KEY}` → backend
+- `NEO4J_URI=bolt://neo4j:7687` → backend (hardcoded service name, not from host .env)
+- `NEO4J_PASSWORD=${NEO4J_PASSWORD:-password}` → both neo4j and backend
+- `ALLOWED_ORIGINS=${ALLOWED_ORIGINS:-*}` → backend
 
-**Required env vars:**
-- `LLM_API_KEY` — OpenRouter API key (used by all LLM components)
-- `NEO4J_PASSWORD` — Neo4j database password (default: `password`)
-- `NEO4J_URI` — Neo4j connection URI (default: `bolt://localhost:7687`)
+## SSE Event Protocol
 
-**Optional env vars:**
-- `NEO4J_USER` — Neo4j username (default: `neo4j`, hardcoded fallback in service files)
+All streaming endpoints return `text/event-stream` with JSON-encoded data lines:
 
-**Secrets location:**
-- `.env` file at project root (gitignored); `.env.example` provides template
+```
+data: {"type":"token","content":"..."}      # LLM output chunk
+data: {"type":"status","content":"..."}     # Progress update
+data: {"type":"debug","event":"..."}        # Internal debug (also written to /logs/debug.jsonl)
+data: {"type":"done","payload":{...}}       # Final structured result
+data: {"type":"error","message":"..."}      # Error condition
+```
 
-## Webhooks & Callbacks
+Headers set: `Cache-Control: no-cache`, `X-Accel-Buffering: no`
 
-**Incoming:**
-- None configured
+## WebSocket Endpoints
 
-**Outgoing:**
-- None configured
+- `GET /api/v1/knowledge/progress` — WebSocket for knowledge base ingestion progress
+- Proxied by Vite dev server: `/api/v1/knowledge/progress` → `ws://backend:8000` (must be configured BEFORE the generic `/api` HTTP proxy rule in `frontend/vite.config.ts`)
 
 ---
 
-*Integration audit: 2025-01-24*
+*Integration audit: 2025-07-15*

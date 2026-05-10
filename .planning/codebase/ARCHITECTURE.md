@@ -1,6 +1,194 @@
-# Architecture
+# Architecture Overview
 
-**Analysis Date:** 2025-01-14
+**Analysis Date:** 2025-01-31
+
+---
+
+## System Design
+
+AWS Architecture Advisor is a multi-turn chatbot that guides users through describing their infrastructure requirements and then produces an AWS architecture plan, cost estimate, and deployable Terraform configuration.
+
+The system is split into three Docker services: a **React SPA** (frontend), a **FastAPI async backend**, and **Neo4j** (graph + vector database). Conversation history is persisted in **SQLite** at `/app/data/advisor.db`. All SSE events are also logged to `/logs/debug.jsonl` for debugging.
+
+The backend is fully async. Blocking operations (SQLite, sentence-transformer embeddings, Neo4j queries) are wrapped with `asyncio.to_thread()`. All generation endpoints return `StreamingResponse` with `text/event-stream` media type.
+
+The LLM is **GPT-4o** accessed through **OpenRouter** (`https://openrouter.ai/api/v1`) using the LangChain `ChatOpenAI` adapter.
+
+---
+
+## Component Diagram
+
+```
+┌─────────────────────────────────────────────────────────────────┐
+│  Browser (React SPA — port 3000)                                │
+│                                                                 │
+│  ┌─────────────┐  ┌──────────────┐  ┌──────────────────────┐  │
+│  │  Sidebar    │  │   ChatBox    │  │   ArtifactDrawer     │  │
+│  │ (sessions)  │  │ (SSE reader) │  │ Architecture/Costs/  │  │
+│  └─────────────┘  └──────┬───────┘  │ Terraform/Debug tabs │  │
+│                          │          └──────────────────────┘  │
+│              ActionBar ──┘  (Generate Architecture/Costs/TF)   │
+└──────────────────────────────────────────────────────────────────┘
+                          │  HTTP / SSE
+                          ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  FastAPI Backend (port 8000)                                    │
+│                                                                 │
+│  POST /api/v1/chat/stream  ──►  GATHER_PROMPT / FOLLOWUP_PROMPT │
+│  POST /api/v1/generate/architecture  ──►  ArchitectureAdvisor  │
+│  POST /api/v1/generate/costs         ──►  inline LLM stream    │
+│  POST /api/v1/generate/terraform     ──►  TERRAFORM_FULL_PROMPT │
+│                                                                 │
+│  ┌────────────────────────┐  ┌──────────────────────────────┐  │
+│  │  ArchitectureAdvisor   │  │  SQLite DB (database.py)     │  │
+│  │  - build_advisor_msgs  │  │  conversations / messages /  │  │
+│  │  - get_recommendation  │  │  artifacts tables            │  │
+│  │  - compact_conversation│  └──────────────────────────────┘  │
+│  └────────────┬───────────┘                                    │
+│               │  VectorCypherRetriever                         │
+└───────────────┼─────────────────────────────────────────────────┘
+                │  bolt://neo4j:7687
+                ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  Neo4j 5.26.0 (port 7687 / 7474)                               │
+│                                                                 │
+│  Nodes:  AWS_Service, WellArchitected_Pillar,                  │
+│          Document_Chunk, KnowledgeDocument,                     │
+│          Architecture_Pattern                                   │
+│                                                                 │
+│  Vector index: aws_document_chunks (384-dim cosine,            │
+│                all-MiniLM-L6-v2 embeddings)                    │
+│                                                                 │
+│  Cypher: MATCH (node)-[:PART_OF]->(doc:KnowledgeDocument)      │
+│          RETURN node.text, doc.filename, score                  │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+---
+
+## Key Flows
+
+### 1. Multi-turn Requirement Gathering → Architecture Unlock
+
+1. User types message → browser POSTs to `POST /api/v1/chat/stream` (`ChatRequest: {message, conversation_id}`)
+2. Backend loads conversation state (`db.get_state`) and history (`db.get_history`) from SQLite
+3. If state is `'gathering'`: backend builds `[SystemMessage(GATHER_PROMPT), *history, HumanMessage(message)]` and streams tokens via `llm.astream()`
+4. Each token emits SSE event: `data: {"type":"token","content":"..."}\n\n`
+5. When LLM embeds `{"ready_for":["architecture"]}` in its response, backend strips signal, sets state → `architecture_ready`, and emits `done` event with `ready_for: ["architecture"]`
+6. Frontend receives `done.ready_for`, calls `handleUnlock(["architecture"])` → ActionBar unlocks the **Generate Architecture** button
+
+### 2. Architecture Generation (SSE)
+
+1. User clicks **Generate Architecture** → `POST /api/v1/generate/architecture` (`{conversation_id}`)
+2. `advisor.build_advisor_messages(history)` runs:
+   a. Queries Neo4j graph (`AWS_Service -[:ALIGNS_WITH]-> WellArchitected_Pillar`, limit 20)
+   b. Runs `VectorCypherRetriever.search()` (top-5, `all-MiniLM-L6-v2` embeddings) against `aws_document_chunks` index
+   c. Emits SSE `rag` event with retrieval metadata (`hits`, `sources`)
+   d. Builds `SystemMessage(ADVISOR_PROMPT.format(context=..., requirements=...))` + history
+3. Backend streams raw JSON tokens from LLM (GPT-4o via OpenRouter)
+4. On stream end, accumulated text is parsed: `ArchitecturePlan.model_validate_json(clean_text)`
+5. Plan saved as artifact: `db.save_artifact(conv_id, "architecture", plan.model_dump_json())`
+6. State → `architecture_ready`; SSE `done` emitted with `{summary, diagram, services, iac_snippet, cost_estimate}` and `ready_for: ["costs"]`
+7. Frontend sets `artifacts.architecture`, unlocks **Generate Costs** button
+
+### 3. Cost Estimation (SSE)
+
+1. User clicks **Generate Costs** → `POST /api/v1/generate/costs`
+2. Backend loads history + `architecture` artifact from SQLite
+3. Builds messages: `SystemMessage(cost_system + arch_artifact)` + history + `HumanMessage("Generate detailed cost estimate")`
+4. Streams Markdown tokens; on done saves to `db.save_artifact(conv_id, "costs", cost_text)`
+5. State → `costs_ready`; SSE `done` with `ready_for: ["terraform"]`
+6. Tokens stream live into the Costs tab as they arrive
+
+### 4. Terraform Generation (SSE)
+
+1. User clicks **Generate Terraform** → `POST /api/v1/generate/terraform`
+2. Backend builds `[SystemMessage(TERRAFORM_FULL_PROMPT + arch_artifact), *history[-10:], HumanMessage("Generate config")]`
+3. Streams HCL tokens; strips markdown fences via `_strip_json_fences()`
+4. Saved to `db.save_artifact(conv_id, "terraform", clean_hcl)`
+5. State → `terraform_ready`; SSE `done` with `{content, filename: "main.tf"}`
+6. Frontend enables a download button for `main.tf`
+
+### 5. Conversation Restore (Page Reload)
+
+1. On mount, `App.tsx` reads `localStorage['aws_advisor_conv_id']` for last active conversation
+2. Fetches `GET /api/v1/conversations` → populates sidebar with all sessions
+3. Fetches `GET /api/v1/conversations/{id}/context` → restores `state` + all three artifacts
+4. Button unlock state is recomputed from `state` value (e.g. `'terraform_ready'` → all three buttons unlocked)
+5. Fetches `GET /api/v1/conversations/{id}/messages` → ChatBox rehydrates message history
+
+---
+
+## State Machine
+
+The `conversations.state` column in SQLite drives the entire UI unlock flow:
+
+| State | Meaning | Unlocked Buttons |
+|---|---|---|
+| `gathering` | Collecting requirements | None |
+| `architecture_ready` | Ready signal received | Architecture |
+| `presenting` | After architecture shown (legacy) | Architecture |
+| `costs_ready` | Cost estimate generated | Architecture, Costs |
+| `terraform_ready` | Terraform generated | Architecture, Costs, Terraform |
+| `complete` | Plan approved via `/approve` | All |
+
+State transitions happen in `backend/src/api/routes.py` via `db.set_state(conv_id, new_state)`.
+
+---
+
+## SSE Event Types
+
+All SSE events are JSON serialized as `data: {...}\n\n`. Every event is additionally written to `/logs/debug.jsonl` with a `_ts` timestamp field (stripped before sending to client).
+
+| Type | Shape | When |
+|---|---|---|
+| `token` | `{type, content}` | Each LLM output chunk |
+| `debug` | `{type, event, ...}` | LLM call start/done, errors |
+| `rag` | `{type, event, query, hits, sources}` | After vector retrieval |
+| `done` | `{type, payload, ready_for?}` | Stream complete |
+| `error` | `{type, message}` | Unhandled exceptions |
+| `status` | `{type, content}` | Informational messages |
+
+---
+
+## State Management
+
+| Layer | What | Where |
+|---|---|---|
+| SQLite | Conversation history, artifacts, state | `/app/data/advisor.db` via `backend/src/db/database.py` |
+| Neo4j | AWS service graph, Well-Architected pillars, document chunks + embeddings | `bolt://neo4j:7687` |
+| In-memory (backend) | `_terraform_cache: Dict[str,str]` keyed by `recommendation_id` | `backend/src/api/routes.py:53` |
+| In-memory (backend) | `_retriever` singleton (VectorCypherRetriever) | `backend/src/core/advisor.py:18` |
+| React state | `artifacts`, `unlockedButtons`, `staleButtons`, `sessions`, `activeConvId`, `debugEvents` | `frontend/src/App.tsx` |
+| localStorage | `aws_advisor_conv_id` (last active session), `debugDrawerOpen` (drawer open state) | Browser |
+
+---
+
+## Error Handling
+
+**Strategy:** Never crash the SSE stream. All `generate/*` generators and `chat/stream` wrap the entire body in `try/except Exception` and yield `{"type":"error","message":"..."}` before returning.
+
+**Structured output failures:** `ArchitectureAdvisor.get_recommendation()` retries once with a corrective prompt. If parsing still fails it raises `StructuredOutputError`, which `routes.py` catches and returns a `ChatResponse` with `error` field set.
+
+**Terraform validation:** `_validate_terraform()` returns `(None, [])` when Terraform CLI is absent — never raises, graceful fallback.
+
+**Neo4j cold start:** `_get_vector_context()` catches all exceptions and returns `{"text": "", "meta": {..., "error": str(e)}}` — RAG silently degrades to graph-only context.
+
+---
+
+## Cross-Cutting Concerns
+
+**Logging:** All SSE events logged as JSON-lines to `/logs/debug.jsonl` via Python `logging.FileHandler`. Controlled by `_log_event()` in `backend/src/api/routes.py:38`.
+
+**CORS:** Configured in `backend/src/main.py` from `ALLOWED_ORIGINS` env var (default `"*"`).
+
+**DB initialization:** `init_db()` and Neo4j schema setup run in FastAPI `lifespan()` context in `backend/src/main.py:13`.
+
+**Conversation compaction:** `POST /api/v1/chat/{conv_id}/compact` summarizes history into a single `SystemMessage` via `COMPACT_PROMPT`, replacing all prior messages in SQLite. Prevents context-window overflow.
+
+---
+
+*Architecture analysis: 2025-01-31*
 
 ## Pattern Overview
 

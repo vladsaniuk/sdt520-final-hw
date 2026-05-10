@@ -1,294 +1,439 @@
 # Coding Conventions
 
-**Analysis Date:** 2025-07-14
+**Analysis Date:** 2025-07-17
 
 ---
 
 ## Overview
 
-This is a full-stack project with a **Python/FastAPI backend** and a **TypeScript/React frontend**. Each has its own toolchain and conventions. Both live under their respective `backend/` and `frontend/` directories.
+Full-stack project: **Python/FastAPI backend** (`backend/`) + **TypeScript/React frontend** (`frontend/`). Each has its own toolchain. Backend is Python 3.13, frontend is TypeScript 6 / React 19 / Vite 8.
 
 ---
 
-## FRONTEND (TypeScript / React)
+## Python
 
-### Formatting — Prettier
+### Naming
 
-Config: `frontend/.prettierrc`
+| Item | Convention | Example |
+|---|---|---|
+| Files / modules | `snake_case` | `routes.py`, `knowledge_base.py`, `cost_analyzer.py` |
+| Classes | `PascalCase` | `ArchitectureAdvisor`, `ServiceCost`, `KnowledgeBaseService` |
+| Public functions / methods | `snake_case` | `get_recommendation()`, `build_advisor_messages()` |
+| Private helpers | `_snake_case` (leading underscore) | `_log_event()`, `_make_llm()`, `_get_retriever()` |
+| Module-level private state | `_name` | `_embedder`, `_retriever`, `_terraform_cache` |
+| Compiled regex patterns | `UPPER_SNAKE_RE` | `READY_SIGNAL_RE` |
+| Prompt constants | `UPPER_SNAKE` | `GATHER_PROMPT`, `ADVISOR_PROMPT`, `COMPACT_PROMPT` |
+| Pydantic request/response models | `PascalCase` with role suffix | `ChatRequest`, `ChatResponse`, `ApproveResponse`, `IaCSnippetResponse` |
 
-| Setting | Value |
-|---|---|
-| Semicolons | `false` (no semicolons) |
-| Quotes | Single quotes |
-| Trailing commas | `"all"` |
-| Print width | 80 |
-| Tab width | 2 spaces |
+### Imports
 
-**Example:**
+All imports go at the **top of the file** — no inline or deferred imports. All local imports use the full `src.` prefix:
+
+```python
+# backend/src/api/routes.py — correct import order
+import uuid
+import json
+import os
+import re
+import logging
+import asyncio
+from datetime import datetime, timezone
+from fastapi import APIRouter, HTTPException
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel
+from src.core.extractor import RequirementExtractor
+from src.core.advisor import ArchitectureAdvisor
+from src.core.models import ArchitecturePlan, StructuredOutputError
+```
+
+Import aliases use `_` prefix to signal module-private re-export: `import re as _re`. **Do not replicate** the `import re as _re` that appears mid-file in `backend/src/core/advisor.py` — that is an acknowledged deviation.
+
+### Async Patterns
+
+- All FastAPI route handlers are `async def`.
+- Sync blocking operations (SQLite DB calls, CPU-bound sentence-transformers inference) are wrapped with `asyncio.to_thread()` — **never** called directly from an async handler:
+
+```python
+# backend/src/api/routes.py
+history = await asyncio.to_thread(db.get_history, conv_id)
+await asyncio.to_thread(db.save_message, conv_id, "human", request.message)
+```
+
+- Subprocess execution uses `asyncio.create_subprocess_exec()` with `asyncio.wait_for()` for timeouts:
+
+```python
+init_proc = await asyncio.create_subprocess_exec(
+    "terraform", "init", "-backend=false", "-input=false",
+    cwd=tmpdir,
+    stdout=asyncio.subprocess.DEVNULL,
+    stderr=asyncio.subprocess.DEVNULL,
+)
+await asyncio.wait_for(init_proc.wait(), timeout=60.0)
+```
+
+- Module-level expensive singletons are lazy-initialized on first call:
+
+```python
+# backend/src/core/advisor.py
+_embedder: SentenceTransformerEmbeddings | None = None
+_retriever: VectorCypherRetriever | None = None
+
+def _get_retriever() -> VectorCypherRetriever:
+    global _embedder, _retriever
+    if _retriever is None:
+        _embedder = SentenceTransformerEmbeddings(model="all-MiniLM-L6-v2")
+        ...
+    return _retriever
+```
+
+- App lifespan uses `@asynccontextmanager` — startup before `yield`, cleanup after:
+
+```python
+# backend/src/main.py
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    init_db()
+    kb_service = KnowledgeBaseService()
+    try:
+        kb_service.initialize_schema()
+    except Exception as e:
+        print(f"[Main] Error initializing KB schema: {e}")
+    yield
+    kb_service.close()
+```
+
+### Pydantic v2 Models
+
+- All models inherit `BaseModel` with `Field(description=...)` on every field — required for `with_structured_output()` JSON schema generation.
+- `@model_validator(mode="before")` + `@classmethod` for LLM output coercion. `mode="before"` handles raw dict normalization; always put both decorators in this order:
+
+```python
+# backend/src/core/models.py — canonical validator pattern
+class ServiceCost(BaseModel):
+    service: str = Field(description="AWS service name")
+    cost: float = Field(description="Estimated monthly cost in USD")
+    is_calculated: bool = Field(description="True if from AWS Pricing API, False if LLM estimate")
+
+    @model_validator(mode="before")
+    @classmethod
+    def _coerce_cost(cls, data: Any) -> Any:
+        if not isinstance(data, dict):
+            return data
+        raw = data.get("cost")
+        if isinstance(raw, str):
+            numeric = _re.sub(r"[^\d.]", "", raw.split()[0] if raw.strip() else "0")
+            try:
+                data["cost"] = float(numeric) if numeric else 0.0
+            except ValueError:
+                data["cost"] = 0.0
+        return data
+```
+
+- `CostEstimate` also normalizes alternative key names the LLM returns (`estimated_monthly_cost`, `monthly_cost`, `cost` → `total`) and handles `breakdown` as a plain dict.
+- **Never** split LLM output strings to extract structured data. Always use:
+  - `llm.with_structured_output(Model, method="json_mode", include_raw=True)` for non-streaming
+  - `Model.model_validate_json(accumulated_text)` for post-stream parse (`/generate/*` endpoints)
+- Use `model_dump_json()` for persistence to SQLite; `model_validate_json()` for deserialization. Do not use `json.dumps(model.dict())`.
+
+### Structured LLM Output — Retry Pattern
+
+```python
+# backend/src/core/advisor.py
+structured_llm = self.llm.with_structured_output(
+    ArchitecturePlan, method="json_mode", include_raw=True
+)
+result = await structured_llm.ainvoke(messages)
+# result = {"raw": AIMessage, "parsed": ArchitecturePlan | None, "parsing_error": str | None}
+
+if result["parsing_error"] is not None:
+    retry_messages = list(messages)
+    retry_messages.append(AIMessage(content=result["raw"].content or ""))
+    retry_messages.append(HumanMessage(
+        content="Your previous response was not valid JSON. Schema:\n"
+                + json.dumps(ArchitecturePlan.model_json_schema(), indent=2)
+    ))
+    result = await structured_llm.ainvoke(retry_messages)
+    if result["parsing_error"] is not None:
+        raise StructuredOutputError(f"Parse failed after retry: {result['parsing_error']}")
+
+return result["parsed"]
+```
+
+### SSE Event Emission
+
+All SSE events go through `_log_event()` in `backend/src/api/routes.py`. **Never** `yield` raw JSON strings directly:
+
+```python
+def _log_event(payload: dict) -> str:
+    """Serialize payload to SSE data string and log it as a JSON line."""
+    payload["_ts"] = datetime.now(timezone.utc).isoformat()
+    line = json.dumps(payload)
+    _debug_log.debug(line)   # writes to /logs/debug.jsonl
+    payload.pop("_ts")       # strip before wire
+    return f"data: {json.dumps(payload)}\n\n"
+
+# Usage in a generator:
+yield _log_event({'type': 'token', 'content': token})
+yield _log_event({'type': 'done', 'payload': payload, 'ready_for': ['costs']})
+```
+
+SSE event `type` values:
+
+| `type` | Meaning |
+|--------|---------|
+| `token` | LLM streaming token — `{"type":"token","content":"…"}` |
+| `status` | Human-readable progress update |
+| `debug` | Internal pipeline event (`event` sub-key) |
+| `rag` | RAG retrieval result (`hits`, `query`, `sources`) |
+| `done` | Final payload — `{"type":"done","payload":{…},"ready_for":[…]}` |
+| `error` | Fatal error — `{"type":"error","message":"…"}` |
+
+SSE endpoints return `StreamingResponse` with these headers:
+
+```python
+return StreamingResponse(
+    stream(),
+    media_type="text/event-stream",
+    headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+)
+```
+
+### Error Handling
+
+- Generators wrap their entire body in `try/except Exception` — log with `print(f"[Component] ...")` and emit an `error` SSE event. Never let a generator raise uncaught.
+- REST endpoints use `raise HTTPException(status_code=..., detail=...)`.
+- `StructuredOutputError` (defined in `backend/src/core/models.py`) is the domain exception for LLM parse failure — raised in `advisor.py`, caught in route handlers.
+- Graceful fallbacks use `None`-typed fields (e.g., `valid: bool | None` on `ApproveResponse`) when optional infrastructure (Terraform CLI) is absent.
+
+### Formatting / Linting (Backend)
+
+Config: `backend/pyproject.toml`
+
+- **Formatter:** `black`, line-length 88, target Python 3.13
+- **Linter:** `ruff` with rules `E, F, I, N, W, C90, B`
+- Run: `black backend/src && ruff check backend/src`
+
+### Comments
+
+- Numbered inline comments for sequential steps:
+  ```python
+  # 1. Graph context
+  # 2. Vector context
+  # 3. Build message list
+  ```
+- Log prefix with component name: `print(f"[Advisor] Vector retrieval failed: {e}")`
+- Docstrings on all public methods of service classes. Route handler docstrings describe SSE contract.
+
+---
+
+## TypeScript / React
+
+### Naming
+
+| Item | Convention | Example |
+|---|---|---|
+| Component files | `PascalCase.tsx` | `ChatBox.tsx`, `DebugTab.tsx`, `MermaidViewer.tsx` |
+| Page files | `PascalCase.tsx` | `KnowledgeBase.tsx` |
+| Style files | `lowercase.css` | `mermaid.css`, `index.css` |
+| Interfaces / Types | `PascalCase` | `DebugEvent`, `DebugInfo`, `ChatBoxHandle`, `Session` |
+| Components | `export const Name: React.FC<Props>` | `export const DebugTab: React.FC<DebugTabProps>` |
+| Handlers / helpers | `camelCase` | `handleSend`, `handleUnlock`, `streamGenerateSSE` |
+| Page union types | string literal union | `type Page = 'chat' \| 'knowledge'` |
+| Boolean state / props | `boolean` (never `bool`) | `drawerOpen: boolean`, `is_calculated: boolean` |
+
+### Component Patterns
+
+- All components are function components with explicit `React.FC<Props>` typing.
+- Only `App` (entry point) uses `export default`. All other components use named exports.
+- Components that expose imperative methods use `forwardRef` + `useImperativeHandle`:
+
 ```tsx
-const handleSend = async () => {
-  if (!input.trim()) return
-  setMessages((prev) => [...prev, userMessage])
+// frontend/src/components/Chat/ChatBox.tsx
+export interface ChatBoxHandle {
+  compact: () => Promise<void>
+  clear: () => Promise<void>
+  hasMessages: () => boolean
 }
+
+export const ChatBox = forwardRef<ChatBoxHandle, ChatBoxProps>(
+  ({ conversationId, onSessionUpdate, onUnlock, onStale, onDebugEvent }, ref) => {
+    useImperativeHandle(ref, () => ({ compact, clear, hasMessages }))
+    // ...
+  }
+)
 ```
 
-### Linting — ESLint
+- `useCallback` wraps all handlers passed as props or stored in refs.
+- State initialized from `localStorage` uses a lazy initializer: `useState(() => localStorage.getItem('key') ?? default)`.
+- Prop callbacks use optional chaining: `onDebugEvent?.({...})` — never assume all callbacks are provided.
 
-Config: `frontend/eslint.config.js` (flat config format)
+### SSE Handling
 
-- `@eslint/js` recommended
-- `typescript-eslint` recommended
-- `eslint-plugin-react-hooks` (hooks rules enforced)
-- `eslint-plugin-react-refresh` (Vite React refresh compat)
-- Targets: `**/*.{ts,tsx}` only
-- Ignored: `dist/`
+**Always use `fetch` + `ReadableStream`. Never use `EventSource`** — `EventSource` cannot POST or send custom headers.
 
-Run: `npm run lint` (from `frontend/`)
+Canonical pattern (from `frontend/src/App.tsx`):
 
-### TypeScript Strictness
+```typescript
+const response = await fetch(`/api/v1/generate/${type}`, {
+  method: 'POST',
+  headers: { 'Content-Type': 'application/json' },
+  body: JSON.stringify({ conversation_id: convId }),
+})
+if (!response.ok || !response.body) throw new Error(`HTTP ${response.status}`)
 
-Config: `frontend/tsconfig.app.json`
+const reader = response.body.getReader()
+const decoder = new TextDecoder()
+let buffer = ''
 
-- `"noUnusedLocals": true` — unused variables are errors
-- `"noUnusedParameters": true` — unused function params are errors
-- `"noFallthroughCasesInSwitch": true`
-- `"erasableSyntaxOnly": true`
-- Target: `ES2023`, module: `esnext`, moduleResolution: `bundler`
-- JSX: `react-jsx` (no need to import React for JSX)
+while (true) {
+  const { done, value } = await reader.read()
+  if (done) break
+  buffer += decoder.decode(value, { stream: true })
 
-### Naming Conventions (Frontend)
+  const parts = buffer.split('\n\n')
+  buffer = parts.pop() ?? ''   // retain incomplete trailing chunk
 
-**Files:**
-- Components: PascalCase matching the export name — `ChatBox.tsx`, `CostTable.tsx`, `MermaidViewer.tsx`
-- Pages: PascalCase — `KnowledgeBase.tsx`
-- Styles: lowercase — `mermaid.css`, `index.css`
+  for (const part of parts) {
+    const line = part.trim()
+    if (!line.startsWith('data: ')) continue
+    const jsonStr = line.slice(6)
+    let event: Record<string, unknown>
+    try { event = JSON.parse(jsonStr) } catch { continue }
 
-**Directories:**
-- Feature-grouped under `src/components/` with subdirectory per domain: `Chat/`, `Cost/`, `Code/`, `Diagram/`, `Tradeoff/`
-- Pages under `src/pages/`
-- Assets under `src/assets/`
-
-**Variables & Functions:** `camelCase`
-**Types & Interfaces:** `PascalCase`
-**React Components:** Named exports using `export const ComponentName: React.FC = ...`
-
-### Component Pattern
-
-All components use named exports (not default exports, except `App`):
-
-```tsx
-// Correct pattern
-export const ChatBox: React.FC = () => {
-  const [input, setInput] = useState('')
-  // ...
-  return (...)
-}
-
-// App.tsx uses default export (entry point only)
-export default App
-```
-
-### Interface / Type Definitions
-
-Interfaces are defined in the same file as their consuming component, above the component function:
-
-```tsx
-interface Message {
-  role: 'user' | 'assistant'
-  content: string
-  diagram?: string
-  iac?: IaC[]
-  costs?: Costs
-}
-```
-
-- Use `interface` (not `type`) for object shapes
-- Optional properties use `?`
-- Union types for constrained strings: `role: 'user' | 'assistant'`
-
-### Import Organization
-
-```tsx
-import React, { useState } from 'react'           // External packages first
-import { MermaidViewer } from '../Diagram/MermaidViewer'  // Local imports second
-import { CodeSnippet } from '../Code/Snippet'
-```
-
-No path aliases detected — all local imports use relative paths.
-
-### Async / Error Handling Pattern
-
-```tsx
-const handleSend = async () => {
-  setLoading(true)
-  try {
-    const response = await fetch('/api/v1/chat', { ... })
-    const data = await response.json()
-    setMessages((prev) => [...prev, assistantMessage])
-  } catch (error) {
-    console.error('Error sending message:', error)
-  } finally {
-    setLoading(false)
+    if (event.type === 'token') { /* accumulate */ }
+    else if (event.type === 'done') { /* final payload */ }
+    else if (event.type === 'error') { /* show error */ }
   }
 }
 ```
 
-- `try/catch/finally` for all async fetch calls
-- `console.error` for caught errors (no custom error logging)
-- Loading state with boolean `useState`
+Key rules:
+- Keep `buffer` between read iterations — partial SSE lines arrive split across TCP chunks.
+- Guard `!response.body` before calling `.getReader()`.
+- Catch per-event JSON parse errors with `continue` — one malformed event must not break the stream.
 
-### Styling
+### Mermaid
 
-- Tailwind CSS v4 via `frontend/tailwind.config.js` and `frontend/postcss.config.js`
-- All styles applied directly as Tailwind utility classes — no CSS Modules
-- Global styles in `src/index.css` and `src/App.css`
-- Component-specific CSS only for Mermaid: `src/styles/mermaid.css`
+Use `mermaid.render(id, definition)` — **not** `mermaid.run()`, `mermaid.contentLoaded()`, or `mermaid.init()`. `render()` returns a Promise and rejects on parse errors, enabling graceful fallback:
 
----
+```tsx
+// frontend/src/components/Diagram/MermaidViewer.tsx
+mermaid.initialize({ startOnLoad: false, theme: 'default', securityLevel: 'loose' })
 
-## BACKEND (Python / FastAPI)
-
-### Formatting — Black
-
-Config: `backend/pyproject.toml`
-
-```toml
-[tool.black]
-line-length = 88
-target-version = ['py313']
+mermaid.render(`mermaid-diagram-${Date.now()}`, sanitized)
+  .then(({ svg }) => { el.innerHTML = svg })
+  .catch((err: unknown) => {
+    console.error('[MermaidViewer] render failed:', err)
+    el.textContent = '⚠ Could not render diagram — invalid Mermaid syntax'
+  })
 ```
 
-### Linting — Ruff
+Always run `sanitizeMermaid()` on LLM output before rendering — LLMs emit `[ECS Fargate (Containers)]` which breaks the parser because `(` starts a shape definition in Mermaid syntax.
 
-Config: `backend/pyproject.toml`
+### State Management
 
-```toml
-[tool.ruff]
-line-length = 88
-target-version = "py313"
-
-[tool.ruff.lint]
-select = ["E", "F", "I", "N", "W", "C90", "B"]
-```
-
-Active rule sets:
-- `E` / `W` — pycodestyle errors/warnings
-- `F` — Pyflakes (undefined names, unused imports)
-- `I` — isort (import ordering)
-- `N` — pep8-naming (naming conventions enforced)
-- `C90` — McCabe complexity
-- `B` — flake8-bugbear (common bugs and design problems)
-
-Run: `ruff check .` and `black .` (from `backend/`)
-
-### Naming Conventions (Backend)
-
-| Item | Convention | Example |
-|---|---|---|
-| Classes | `PascalCase` | `RequirementExtractor`, `ArchitectureAdvisor` |
-| Functions/methods | `snake_case` | `get_recommendation`, `extract_mermaid` |
-| Variables | `snake_case` | `graph_context`, `formatted_prompt` |
-| Constants/env vars | `UPPER_SNAKE_CASE` | `LLM_API_KEY`, `NEO4J_URI` |
-| Modules/files | `snake_case` | `cost_analyzer.py`, `knowledge_base.py` |
-| Pydantic models | `PascalCase` | `ChatRequest`, `ChatResponse` |
+- No external state library. State is co-located in the owning component; lifted to `App.tsx` for cross-component sharing.
+- `ChatBox` owns: `messages`, `conversationId`, `loading`, `fillPercent`.
+- `App.tsx` owns: `sessions`, `activeConvId`, `unlockedButtons`, `staleButtons`, `artifacts`, `debugEvents`, `debugInfo`.
+- `localStorage` is the persistence cache (keyed `aws_advisor_*`); the backend SQLite DB is authoritative. On mount, try `localStorage` first and fall back to a backend fetch.
 
 ### Import Organization
 
-```python
-import json                          # stdlib
-import os
-from typing import Dict, Any
+```tsx
+// 1. React core
+import React, { useEffect, useRef, useState } from 'react'
 
-from fastapi import APIRouter         # third-party
-from langchain_openai import ChatOpenAI
+// 2. Third-party libraries
+import { Box, VStack, Text, Badge } from '@chakra-ui/react'
+import { MdSend } from 'react-icons/md'
 
-from src.core.extractor import RequirementExtractor  # local (src-prefixed)
+// 3. Internal components / pages
+import { ChatBox } from './components/Chat/ChatBox'
+
+// 4. Type-only imports (use `import type`)
+import type { ChatBoxHandle } from './components/Chat/ChatBox'
+import type { DebugEvent, DebugInfo } from './components/Drawer/DebugTab'
 ```
 
-All local imports use full `src.` prefix — e.g., `from src.core.prompts import ADVISOR_PROMPT`.
+No path aliases — all local imports use relative paths.
 
-### Class Pattern (Services)
+### Linting (Frontend)
 
-Service classes initialize dependencies in `__init__`, expose single public methods:
+Config: `frontend/eslint.config.js` (flat config)
 
-```python
-class RequirementExtractor:
-    def __init__(self):
-        self.llm = ChatOpenAI(
-            model="openai/gpt-4o",
-            openai_api_key=os.getenv("LLM_API_KEY"),
-            openai_api_base="https://openrouter.ai/api/v1"
-        )
-
-    def extract(self, description: str) -> Dict[str, Any]:
-        """Extracts technical requirements from a natural language description."""
-        ...
-```
-
-- Constructor reads from `os.getenv()` directly
-- One-line docstrings on public methods
-- Return type hints using `typing` module (`Dict[str, Any]`, `Optional[str]`, `List[...]`)
-
-### Error Handling Pattern (Backend)
-
-```python
-try:
-    result = self.llm.invoke(formatted_prompt)
-    return {"advice": result.content}
-except Exception as e:
-    print(f"[ServiceName] Error during operation: {e}")
-    return {"advice": "fallback message"}
-```
-
-- Broad `except Exception` with `print` logging (prefixed with `[ClassName]`)
-- Returns safe fallback values on failure (never raises to caller)
-
-### FastAPI Route Pattern
-
-```python
-router = APIRouter()
-
-class ChatRequest(BaseModel):
-    message: str
-    conversation_id: Optional[str] = None
-
-@router.post("/chat", response_model=ChatResponse)
-async def chat(request: ChatRequest):
-    ...
-```
-
-- Pydantic `BaseModel` for request/response schemas
-- Async route handlers
-- Router objects included in `main.py` with prefix
-
-### SQLAlchemy Models Pattern
-
-File: `backend/src/models/`
-
-```python
-class Workload(Base):
-    __tablename__ = "workloads"
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    description = Column(String, nullable=False)
-    created_at = Column(DateTime, default=datetime.utcnow)
-    recommendations = relationship("Recommendation", back_populates="workload")
-```
-
-- UUID primary keys using `sqlalchemy.dialects.postgresql.UUID`
-- `nullable=False` explicit on required fields
-- Relationships defined bidirectionally with `back_populates`
-
-### Comments
-
-- Inline numbered comments for sequential steps in complex functions:
-  ```python
-  # 1. Extract requirements
-  # 2. Get recommendation
-  # 3. Extract diagram
-  ```
-- `TODO:` for unimplemented features: `# TODO: Implement vector retrieval`
-- No docstrings on route handlers; docstrings only on service methods
+- `typescript-eslint` recommended + `react-hooks` + `react-refresh`
+- `@typescript-eslint/no-explicit-any` active — use specific types or `unknown`; `as any` is a known gap to eliminate
+- Run: `npm run lint` from `frontend/`
 
 ---
 
-*Convention analysis: 2025-07-14*
+## API Design
+
+### URL Structure
+
+```
+/api/v1/
+  health                              GET  — liveness probe
+  conversations                       GET  — list all conversations
+  conversations/{conv_id}             DELETE
+  conversations/{conv_id}/messages    GET
+  conversations/{conv_id}/context     GET  — state + all artifacts
+  chat                                POST — non-streaming (legacy)
+  chat/stream                         POST — SSE streaming (gather / follow-up)
+  chat/{conv_id}/compact              POST
+  chat/{conv_id}/clear                POST
+  chat/{conv_id}/approve              POST
+  generate/architecture               POST — SSE streaming
+  generate/costs                      POST — SSE streaming
+  generate/terraform                  POST — SSE streaming
+  knowledge/*                         knowledge base routes
+  debug/info                          GET
+```
+
+### Response Shape
+
+- REST endpoints return typed Pydantic response models (`response_model=ChatResponse`).
+- SSE endpoints return `StreamingResponse(media_type="text/event-stream")`.
+- All SSE `done` events carry a `payload` key with the structured result.
+- SSE `done` events may also carry `ready_for: string[]` to signal frontend button unlocks.
+- Errors inside SSE generators emit `{"type":"error","message":"..."}` — never raise HTTP exceptions from inside a streaming generator.
+
+### Conversation State Machine
+
+States stored in SQLite per conversation, controlled by `backend/src/db/database.py`:
+
+```
+gathering → architecture_ready → presenting → costs_ready → terraform_ready → complete
+```
+
+The `READY_SIGNAL_RE` regex in `backend/src/api/routes.py` detects `{"ready_for":["architecture"]}` embedded in LLM gather responses and triggers transition. The signal is stripped before storing the AI message.
+
+---
+
+## Critical Rules
+
+These **must** be followed to avoid breakage:
+
+1. **No string-splitting of LLM output for structured data.** Use `llm.with_structured_output(Model, method="json_mode", include_raw=True)` for non-streaming or `Model.model_validate_json(text)` after accumulating SSE tokens. String splitting breaks when LLM format drifts.
+
+2. **All Python imports at the top of the file.** No inline imports. The mid-file `import re as _re` in `backend/src/core/advisor.py` is a known exception — do not replicate.
+
+3. **`@model_validator(mode="before")` for LLM output coercion.** LLMs return `"$150/month"` for cost fields and non-standard key names. The validators in `ServiceCost` and `CostEstimate` normalize these. New structured output models need the same defensive validators.
+
+4. **SSE via `fetch` + `ReadableStream`, never `EventSource`.** `EventSource` cannot POST or set `Content-Type` headers.
+
+5. **`mermaid.render()` not `mermaid.run()` / `mermaid.contentLoaded()`.** Only `render()` provides a rejectable Promise for graceful error display.
+
+6. **All SSE events through `_log_event()`.** Never `yield f"data: {json.dumps(...)}\n\n"` directly — the helper handles timestamps and file logging.
+
+7. **Sync DB/CPU calls wrapped in `asyncio.to_thread()`.** Never call `db.*` functions or CPU-bound operations directly from an async handler.
+
+8. **`boolean` not `bool` in TypeScript.** `bool` is not a TypeScript type.
+
+9. **Always `sanitizeMermaid()` before `mermaid.render()`.** LLM-generated Mermaid with `(` inside `[...]` labels will throw a parse error.
+
+10. **`model_dump_json()` / `model_validate_json()` for Pydantic persistence.** Do not use `json.dumps(model.dict())` or `json.loads` + dict unpacking — these bypass v2 validators.
+
+---
+
+*Convention analysis: 2025-07-17*

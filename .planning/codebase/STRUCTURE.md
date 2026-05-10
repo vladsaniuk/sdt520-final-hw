@@ -1,8 +1,232 @@
-# Codebase Structure
+# Directory Structure
 
-**Analysis Date:** 2025-01-14
+**Analysis Date:** 2025-01-31
 
-## Directory Layout
+---
+
+## Backend
+
+```
+backend/
+├── Dockerfile                        # Python 3.13-slim; uvicorn entrypoint
+├── pyproject.toml                    # Ruff + Black config
+├── requirements.txt                  # Python runtime dependencies
+├── data/                             # SQLite volume mount (runtime, not committed)
+│   └── advisor.db                    # SQLite database (conversations, messages, artifacts)
+├── tests/
+│   ├── unit/
+│   │   └── test_advisor.py           # Unit tests for ArchitectureAdvisor
+│   └── evals/
+│       ├── test_rag_evals.py         # RAG quality evals (deepeval)
+│       └── results.md                # Evaluation results log
+└── src/
+    ├── main.py                       # FastAPI app factory; lifespan hook (init_db + KB schema)
+    ├── api/
+    │   ├── routes.py                 # ALL primary endpoints (see below)
+    │   ├── knowledge.py              # POST/GET /api/v1/knowledge/* (file upload, status)
+    │   └── seed.py                   # POST /api/v1/seed (seed Neo4j with sample data)
+    ├── core/
+    │   ├── advisor.py                # ArchitectureAdvisor — GraphRAG + LLM pipeline
+    │   ├── models.py                 # Pydantic schemas: ArchitecturePlan, CostEstimate, ServiceCost
+    │   ├── prompts.py                # All prompt templates: GATHER_PROMPT, ADVISOR_PROMPT,
+    │   │                             #   FOLLOWUP_PROMPT, TERRAFORM_FULL_PROMPT, COMPACT_PROMPT
+    │   ├── extractor.py              # RequirementExtractor (NL → JSON requirements dict)
+    │   ├── cost_analyzer.py          # CostAnalyzer (LLM + Pricing API)
+    │   ├── diagrammer.py             # DiagramGenerator (Mermaid extractor)
+    │   ├── tradeoff_analyzer.py      # TradeoffAnalyzer (LLM)
+    │   └── iac/
+    │       ├── terraform.py          # TerraformGenerator (HCL, sync — legacy)
+    │       └── cloudformation.py     # CloudFormationGenerator (YAML, legacy)
+    ├── db/
+    │   └── database.py               # SQLite helpers: init_db, save_message, get_history,
+    │                                 #   save_artifact, get_artifact, list_conversations,
+    │                                 #   set_state, get_state, delete_conversation
+    ├── models/
+    │   └── workload.py               # SQLAlchemy ORM schema (not wired at runtime; docs only)
+    └── services/
+        ├── knowledge_base.py         # KnowledgeBaseService: Neo4j schema init, CRUD
+        ├── ingestion.py              # Document ingestion pipeline (chunk + embed → Neo4j)
+        ├── pricing.py                # PricingService (AWS Pricing API + file cache)
+        └── seed.py                   # Seed data loader
+```
+
+### `backend/src/api/routes.py` — Endpoint Reference
+
+| Method | Path | Description |
+|---|---|---|
+| GET | `/api/v1/health` | Health check |
+| GET | `/api/v1/conversations` | List all conversations (sidebar restore) |
+| DELETE | `/api/v1/conversations/{conv_id}` | Delete conversation + all messages/artifacts |
+| GET | `/api/v1/conversations/{conv_id}/messages` | Return messages for chat restore |
+| GET | `/api/v1/conversations/{conv_id}/context` | Return state + artifacts for button restore |
+| POST | `/api/v1/chat/stream` | SSE streaming gathering/followup chat |
+| POST | `/api/v1/chat` | Non-streaming full architecture (legacy) |
+| POST | `/api/v1/chat/{conv_id}/compact` | Summarize history into single SystemMessage |
+| POST | `/api/v1/chat/{conv_id}/clear` | Wipe conversation history |
+| POST | `/api/v1/chat/{conv_id}/approve` | Generate + validate full Terraform HCL |
+| POST | `/api/v1/generate/architecture` | SSE: stream ArchitecturePlan JSON |
+| POST | `/api/v1/generate/costs` | SSE: stream Markdown cost estimate |
+| POST | `/api/v1/generate/terraform` | SSE: stream HCL Terraform config |
+| GET | `/api/v1/debug/info` | System snapshot (Neo4j, SQLite, model, prompts) |
+
+### `backend/src/core/models.py` — Core Pydantic Schemas
+
+```python
+ServiceDetail(name, description, rationale)
+ServiceCost(service, cost: float, is_calculated: bool)   # coerces str cost values
+CostEstimate(total: float, breakdown: List[ServiceCost]) # normalizes alt field names
+ArchitecturePlan(summary, diagram, services, iac_snippet, cost_estimate)
+StructuredOutputError(Exception)
+```
+
+### `backend/src/db/database.py` — SQLite Schema
+
+```sql
+conversations (id TEXT PK, state TEXT DEFAULT 'gathering', created_at INTEGER, updated_at INTEGER)
+messages (id AUTOINCREMENT, conversation_id TEXT FK, role TEXT, content TEXT, created_at INTEGER)
+artifacts (id AUTOINCREMENT, conversation_id TEXT FK, artifact_type TEXT, content TEXT, created_at INTEGER)
+```
+- `artifact_type` values: `"architecture"` (JSON), `"costs"` (Markdown), `"terraform"` (HCL)
+- DB path: `/app/data/advisor.db` (mounted from `sqlite_data` Docker volume)
+
+---
+
+## Frontend
+
+```
+frontend/
+├── Dockerfile                        # Node 22-slim; Vite dev server on :5173
+├── index.html                        # Vite HTML entry point
+├── package.json                      # NPM dependencies (React, Chakra UI, Mermaid, etc.)
+├── vite.config.ts                    # Vite config (proxy /api → backend:8000)
+├── tsconfig.json                     # TypeScript config
+├── tailwind.config.js                # Tailwind CSS theme (if used alongside Chakra)
+├── eslint.config.js                  # ESLint config
+└── src/
+    ├── main.tsx                      # React DOM root mount; ChakraProvider wrapper
+    ├── App.tsx                       # Root component — ALL top-level state (see below)
+    ├── App.css                       # App-level styles
+    ├── index.css                     # Global styles
+    ├── theme.ts                      # Chakra UI theme customization (aws.orange, aws.squid colors)
+    ├── assets/                       # Static imports (images, SVGs)
+    ├── components/
+    │   ├── ActionBar.tsx             # Generate Architecture/Costs/Terraform buttons
+    │   │                             #   Props: unlockedButtons, staleButtons, loadingButton, onGenerate
+    │   ├── ArtifactDrawer.tsx        # Right-side drawer with 4 tabs:
+    │   │                             #   Architecture (diagram + services), Costs (Markdown),
+    │   │                             #   Terraform (HCL + download), Debug (SSE event log)
+    │   ├── Chat/
+    │   │   └── ChatBox.tsx           # Chat input + message thread; SSE stream reader for /chat/stream
+    │   │                             #   Exposes ChatBoxHandle ref: { compact(), clear(), hasMessages() }
+    │   ├── Code/                     # Syntax-highlighted code block
+    │   ├── Cost/                     # Monthly cost breakdown table
+    │   ├── Diagram/
+    │   │   └── MermaidViewer.tsx     # Renders Mermaid.js diagrams from plan.diagram string
+    │   ├── Drawer/
+    │   │   └── DebugTab.tsx          # Debug tab: SSE event log + system info
+    │   │                             #   Types: DebugEvent { timestamp, type, payload }, DebugInfo
+    │   └── Tradeoff/                 # Trade-off analysis display
+    ├── pages/
+    │   └── KnowledgeBase.tsx         # Full-page Knowledge Base upload/management
+    └── styles/                       # Additional style files
+```
+
+### `frontend/src/App.tsx` — State Inventory
+
+All application-level state lives in `App.tsx`. Components receive state via props or refs.
+
+| State | Type | Purpose |
+|---|---|---|
+| `page` | `'chat' \| 'knowledge'` | Active page route |
+| `sessions` | `Session[]` | Sidebar conversation list |
+| `activeConvId` | `string \| undefined` | Currently selected conversation |
+| `unlockedButtons` | `GenerateType[]` | Which generate buttons are active |
+| `staleButtons` | `GenerateType[]` | Buttons needing re-generation (pulsing) |
+| `loadingButton` | `GenerateType \| null` | Button showing spinner |
+| `drawerOpen` | `boolean` | Right drawer visibility (persisted to localStorage) |
+| `loadingTab` | `string \| null` | Active drawer tab during streaming |
+| `artifacts` | `{architecture?, costs?, terraform?}` | Generated content for drawer tabs |
+| `debugEvents` | `DebugEvent[]` | SSE events for Debug tab |
+| `debugInfo` | `DebugInfo \| null` | System snapshot from `/debug/info` |
+
+`chatRef` (via `useImperativeHandle`) bridges App → ChatBox for sidebar Compact/Clear actions.
+
+---
+
+## Infrastructure
+
+### Docker Compose Services
+
+```yaml
+# docker-compose.yml
+services:
+  neo4j:       # neo4j:5.26.0 — ports 7474 (HTTP UI), 7687 (Bolt)
+  backend:     # FastAPI — port 8000; depends_on neo4j healthy
+  frontend:    # Vite dev — port 3000 → container 5173; depends_on backend healthy
+```
+
+### Networking
+
+- **Frontend → Backend:** Vite proxy (`vite.config.ts`) forwards `/api/*` to `http://backend:8000`
+- **Backend → Neo4j:** Bolt protocol via `NEO4J_URI=bolt://neo4j:7687` (Docker DNS)
+- **Backend → OpenRouter:** HTTPS to `https://openrouter.ai/api/v1` (external)
+
+### Volumes
+
+| Volume | Mount | Contents |
+|---|---|---|
+| `sqlite_data` (named) | `backend:/app/data` | SQLite database (`advisor.db`) |
+| `./data/neo4j` (bind) | `neo4j:/data` | Neo4j database files |
+| `./logs` (bind) | `backend:/logs` | `debug.jsonl` SSE event log |
+| `./backend` (bind) | `backend:/app` | Live code reload in dev |
+| `./frontend` (bind) | `frontend:/app` | Live code reload in dev |
+
+### Environment Variables
+
+| Variable | Service | Description |
+|---|---|---|
+| `LLM_API_KEY` | backend | OpenRouter API key |
+| `NEO4J_URI` | backend | Bolt URI (default: `bolt://neo4j:7687`) |
+| `NEO4J_PASSWORD` | backend, neo4j | Neo4j auth password |
+| `ALLOWED_ORIGINS` | backend | CORS origins (default: `*`) |
+
+---
+
+## Where to Add New Code
+
+**New API endpoint:**
+1. Add handler to `backend/src/api/routes.py` (or new router file in `backend/src/api/`)
+2. Register new router in `backend/src/main.py` via `app.include_router()`
+3. Add Pydantic request/response models to the same router file
+
+**New LLM pipeline step:**
+1. Add prompt to `backend/src/core/prompts.py`
+2. Create `backend/src/core/<step>.py` with a single class
+3. Wire into `backend/src/api/routes.py`
+
+**New generation artifact type:**
+1. Add new `POST /api/v1/generate/<type>` endpoint in `backend/src/api/routes.py`
+2. Use `db.save_artifact(conv_id, "<type>", content)` to persist
+3. Add tab to `frontend/src/components/ArtifactDrawer.tsx`
+4. Add type to `GenerateType` in `frontend/src/components/ActionBar.tsx`
+5. Add state key to `artifacts` in `frontend/src/App.tsx`
+
+**New frontend component:**
+1. Create `frontend/src/components/<Domain>/ComponentName.tsx`
+2. Export as `export const ComponentName: React.FC<Props> = ...`
+
+**New page:**
+1. Create `frontend/src/pages/PageName.tsx`
+2. Add to `Page` type in `App.tsx` and add render case
+
+**New external service:**
+1. Create `backend/src/services/<service>.py` with connection in `__init__`
+2. Add lifecycle management in `backend/src/main.py` `lifespan()` if needed
+
+---
+
+*Structure analysis: 2025-01-31*
+
 
 ```
 sdt520-final-hw/                   # Monorepo root
