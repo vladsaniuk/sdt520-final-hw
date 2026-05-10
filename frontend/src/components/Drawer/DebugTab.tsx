@@ -125,19 +125,19 @@ export const DebugTab: React.FC<DebugTabProps> = ({ events, info }) => {
             <HStack spacing={2} fontSize="xs">
               <Text color="gray.400" minW="16">Model</Text>
               <Text color="gray.200" flex={1} noOfLines={1}>{info.model.name}</Text>
-              <Badge colorScheme="green" fontSize="11px" fontFamily="sans-serif" textTransform="lowercase">via {info.model.provider}</Badge>
+              <Badge colorScheme="green" fontSize="10px">via {info.model.provider}</Badge>
             </HStack>
             <HStack spacing={2} fontSize="xs">
               <Text color="gray.400" minW="16">Neo4j</Text>
               {info.neo4j.connected ? (
                 <>
                   <Text color="gray.200">✅ Connected ({info.neo4j.node_count} nodes)</Text>
-                  <Badge colorScheme="green" fontSize="11px" fontFamily="sans-serif" textTransform="lowercase">OK</Badge>
+                  <Badge colorScheme="green" fontSize="10px">OK</Badge>
                 </>
               ) : (
                 <>
                   <Text color="gray.200">❌ Disconnected</Text>
-                  <Badge colorScheme="red" fontSize="11px" fontFamily="sans-serif" textTransform="lowercase">Down</Badge>
+                  <Badge colorScheme="red" fontSize="10px">Down</Badge>
                 </>
               )}
             </HStack>
@@ -251,9 +251,9 @@ export const DebugTab: React.FC<DebugTabProps> = ({ events, info }) => {
             <Text fontSize="10px" fontWeight="bold" color="gray.500" textTransform="uppercase" letterSpacing="widest">
               Event Log
             </Text>
-            <Badge colorScheme="gray" fontSize="11px" fontFamily="sans-serif" textTransform="lowercase">{totalDisplayed} items</Badge>
+            <Badge colorScheme="gray" fontSize="11px">{totalDisplayed} items</Badge>
             {tokenCount > 0 && (
-              <Badge colorScheme="gray" fontSize="11px" variant="outline" fontFamily="sans-serif" textTransform="lowercase">{tokenCount} tokens grouped</Badge>
+              <Badge colorScheme="gray" fontSize="11px" variant="outline">{tokenCount} tokens grouped</Badge>
             )}
           </HStack>
         </Box>
