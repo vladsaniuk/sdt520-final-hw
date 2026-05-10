@@ -531,8 +531,10 @@ async def generate_architecture(request: GenerateRequest):
                 yield f"data: {json.dumps({'type': 'error', 'message': 'Conversation not found or empty'})}\n\n"
                 return
 
-            messages_for_arch = await advisor.build_advisor_messages(history)
+            messages_for_arch, rag_meta = await advisor.build_advisor_messages(history)
             llm = _make_llm()
+
+            yield f"data: {json.dumps({'type': 'rag', 'event': 'retrieval_done', **rag_meta})}\n\n"
 
             debug_payload = {
                 "type": "debug",

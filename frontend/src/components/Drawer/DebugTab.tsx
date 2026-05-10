@@ -86,8 +86,9 @@ function typeBadgeColor(type: string): string {
     case 'ai':
     case 'status': return 'green'
     case 'debug': return 'orange'
+    case 'rag': return 'purple'
     case 'error': return 'red'
-    case 'done': return 'purple'
+    case 'done': return 'teal'
     default: return 'gray'
   }
 }
@@ -99,6 +100,11 @@ function payloadPreview(event: DebugEvent): string {
   }
   if (event.type === 'debug') {
     return String(event.payload.event ?? '')
+  }
+  if (event.type === 'rag') {
+    const hits = event.payload.hits as number
+    const query = (event.payload.query as string ?? '').slice(0, 50)
+    return `${hits} chunks retrieved — "${query}"`
   }
   return JSON.stringify(event.payload).slice(0, 100)
 }

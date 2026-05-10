@@ -48,27 +48,32 @@ def _get_retriever() -> VectorCypherRetriever:
     return _retriever
 
 
-def _get_vector_context(query_text: str, top_k: int = 5) -> str:
+def _get_vector_context(query_text: str, top_k: int = 5) -> dict:
     """
     Query Document_Chunk nodes via vector similarity search.
-    Returns concatenated chunk text for LLM context injection.
-
-    Returns empty string on cold start (no documents uploaded yet) — does NOT raise.
-    Pitfall avoided: VectorCypherRetriever returns 0 results on cold start, not an exception.
-    Wrap in try/except for safety in case of index state errors.
+    Returns dict with 'text' (for LLM injection) and 'meta' (for debug events).
+    Returns empty text on cold start — does NOT raise.
     """
     try:
         retriever = _get_retriever()
         results = retriever.search(query_text=query_text, top_k=top_k)
         if not results.items:
-            return ""
+            return {"text": "", "meta": {"query": query_text, "hits": 0, "sources": []}}
         lines = []
+        sources = []
         for item in results.items:
             lines.append(item.content)
-        return "\n---\n".join(lines)
+            # item.metadata may contain 'source' from retrieval_query
+            src = getattr(item, "metadata", {})
+            if isinstance(src, dict) and src.get("source"):
+                sources.append(src["source"])
+        return {
+            "text": "\n---\n".join(lines),
+            "meta": {"query": query_text, "hits": len(results.items), "sources": list(set(sources))},
+        }
     except Exception as e:
         print(f"[Advisor] Vector retrieval failed (cold start or index error): {e}")
-        return ""
+        return {"text": "", "meta": {"query": query_text, "hits": 0, "sources": [], "error": str(e)}}
 
 
 class ArchitectureAdvisor:
@@ -117,9 +122,11 @@ class ArchitectureAdvisor:
                 requirements_text = msg.content
                 break
 
-        vector_context = await asyncio.to_thread(
+        rag_result = await asyncio.to_thread(
             _get_vector_context, requirements_text or "AWS architecture", 5
         )
+        vector_context = rag_result["text"]
+        rag_meta = rag_result["meta"]
 
         combined_context = graph_context
         if vector_context:
@@ -138,7 +145,7 @@ class ArchitectureAdvisor:
 
         messages: List[BaseMessage] = [SystemMessage(content=system_content)]
         messages.extend(history)
-        return messages
+        return messages, rag_meta
 
     async def get_recommendation(
         self,
@@ -170,7 +177,8 @@ class ArchitectureAdvisor:
         # 2. Vector context — sync blocking call; acceptable for demo (no asyncio event loop stall
         # because sentence-transformers uses numpy, not IO). Wrap if needed: asyncio.to_thread()
         requirements_text = json.dumps(requirements)
-        vector_context = _get_vector_context(requirements_text, top_k=5)
+        rag_result = _get_vector_context(requirements_text, top_k=5)
+        vector_context = rag_result["text"]
 
         # 3. Combine context
         combined_context = str(graph_context)
