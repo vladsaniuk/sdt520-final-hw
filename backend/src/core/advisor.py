@@ -55,11 +55,13 @@ def _parse_record_string(content: str) -> tuple[str, str | None]:
     """
     neo4j-graphrag serializes full Record objects into item.content when the
     retrieval_query returns multiple columns. Parse text and source out of it.
+    Handles both single and double quoted fields:
     Example: "<Record text='hello' source='foo.pdf' score=0.9>"
+    Example: '<Record text="hello" source="foo.pdf" score=0.9>'
     """
-    text_m = _re.search(r"text='(.*?)'(?:\s+source=|>)", content, _re.DOTALL)
+    text_m = _re.search(r"""text=['"](.+?)['"](?:\s+source=|>)""", content, _re.DOTALL)
     text = text_m.group(1) if text_m else content
-    src_m = _re.search(r"source='([^']+)'", content)
+    src_m = _re.search(r"""source=['"]([^'"]+)['"]""", content)
     source = src_m.group(1) if src_m else None
     return text, source
 
@@ -135,7 +137,7 @@ class ArchitectureAdvisor:
                 LIMIT 20
             """
             raw_graph = await asyncio.to_thread(self.graph.query, context_query) if self.graph else []
-            graph_context = str(raw_graph)
+            graph_context = str(raw_graph) if raw_graph else ""
 
         # 2. Vector context — build query from ALL human messages (full requirements context)
         human_msgs = [msg.content for msg in history if isinstance(msg, HumanMessage)]
@@ -202,7 +204,7 @@ class ArchitectureAdvisor:
         vector_context = rag_result["text"]
 
         # 3. Combine context
-        combined_context = str(graph_context)
+        combined_context = str(graph_context) if graph_context else ""
         if vector_context:
             combined_context += f"\n\n--- Relevant excerpts from uploaded documents ---\n{vector_context}"
 
