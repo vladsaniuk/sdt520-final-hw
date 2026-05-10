@@ -6,10 +6,10 @@ A five-phase brownfield completion. The scaffold (FastAPI + React + Neo4j + Dock
 
 ## Phases
 
-- [ ] **Phase 1: Baseline Fixes** - Repair broken foundation so the app starts, compiles, and makes a real LLM call
+- [x] **Phase 1: Baseline Fixes** - Repair broken foundation so the app starts, compiles, and makes a real LLM call
 - [x] **Phase 2: Graph Seeding & Document Ingestion** - Seed Neo4j with structural AWS knowledge, wire the full document ingestion pipeline, and add the upload UI — so GraphRAG has real data before chat is wired
 - [x] **Phase 3: Multi-Turn Chat** - Wire conversation history and structured output for real iterative architecture refinement (completed 2026-05-09)
-- [ ] **Phase 4: Terraform Download** - Deliver the core artifact: a downloadable, valid Terraform config from an approved plan
+- [x] **Phase 4: Terraform Download** - Deliver the core artifact: a downloadable, valid Terraform config from an approved plan (completed 2026-05-10)
 - [ ] **Phase 5: Docker Polish** - End-to-end validation that `docker compose up` produces a working demo with zero manual steps
 
 ## Phase Details
@@ -107,8 +107,9 @@ Plans:
 
 | Phase | Plans Complete | Status | Completed |
 |-------|----------------|--------|-----------|
-| 1. Baseline Fixes | 0/? | Not started | - |
-| 2. Graph Seeding & Document Ingestion | 0/? | Not started | - |
-| 3. Multi-Turn Chat | 4/4 | Complete   | 2026-05-09 |
-| 4. Terraform Download | 0/? | Not started | - |
-| 5. Docker Polish | 0/? | Not started | - |
+| 1. Baseline Fixes | 2/2 | ✅ Complete | 2026-05-09 |
+| 2. Graph Seeding & Document Ingestion | 3/3 | ✅ Complete | 2026-05-09 |
+| 2.1. UI Polish | 3/3 | ✅ Complete | 2026-05-09 |
+| 3. Multi-Turn Chat | 4/4 | ✅ Verified | 2026-05-09 |
+| 4. Terraform Download | 2/2 | ✅ Complete | 2026-05-10 |
+| 5. Docker Polish | 0/? | ⬜ Not started | - |

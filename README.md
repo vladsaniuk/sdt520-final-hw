@@ -210,11 +210,11 @@ For small tasks that don't belong to a planned phase:
 
 | Phase | Description | Status |
 |-------|-------------|--------|
-| 1 | Baseline Fixes | ⬜ Not started |
+| 1 | Baseline Fixes | ✅ Complete |
 | 2 | Graph Seeding & Document Ingestion | ✅ Complete |
 | 2.1 | UI Polish | ✅ Complete |
 | 3 | Multi-Turn Chat | ✅ Verified |
-| 4 | Terraform Download | ⬜ Not started |
+| 4 | Terraform Download | ✅ Complete |
 | 5 | Docker Polish | ⬜ Not started |
 
 ---

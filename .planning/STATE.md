@@ -3,15 +3,15 @@ gsd_state_version: 1.0
 milestone: v1.0
 milestone_name: milestone
 status: verified
-stopped_at: Verified 03-VERIFICATION.md
-last_updated: "2026-05-10T00:15:00.000Z"
-last_activity: 2026-05-09
+stopped_at: Phase 4 complete — 04-01 and 04-02 SUMMARY exist
+last_updated: "2026-05-10T20:00:00.000Z"
+last_activity: 2026-05-10
 progress:
-  total_phases: 6
-  completed_phases: 4
-  total_plans: 12
-  completed_plans: 12
-  percent: 33
+  total_phases: 5
+  completed_phases: 5
+  total_plans: 14
+  completed_plans: 14
+  percent: 80
 ---
 
 # Project State
@@ -21,16 +21,27 @@ progress:
 See: .planning/PROJECT.md (updated 2025-07-11)
 
 **Core value:** User describes what they want to build → gets a concrete, deployable AWS architecture plan grounded in their own best-practice docs
-**Current focus:** Phase 03 — multi-turn-chat
+**Current focus:** Phase 05 — Docker Polish (final phase)
 
 ## Current Position
 
-Phase: 03 (multi-turn-chat) — VERIFIED ✅
-Plan: 4 of 4
-Status: Phase verified — all 6 CHAT requirements satisfied
+Phase: 04 (terraform-download) — COMPLETE ✅
+Plan: 2 of 2
+Status: Phase 4 complete — approve endpoint, Terraform CLI in Dockerfile, approval UI in ChatBox done.
 Last activity: 2026-05-10 - Completed quick task 260510-vvy: Clean up project — remove spec-kit artifacts and unused scaffolding
 
-Progress: [███░░░░░░░] 33%
+Progress: [████████░░] 80%
+
+### Additional work outside GSD phases (direct commits)
+
+The following significant features were shipped via direct commits after Phase 4 — not tracked in GSD phases:
+- Streaming chat (SSE) + guided Q&A intake
+- SQLite persistence for conversations
+- Backend UX overhaul (artifacts table, JSON signal, streaming generate endpoints)
+- Frontend UX overhaul (ActionBar, ArtifactDrawer, ChatBox rewire, App layout)
+- Debug drawer (system info, prompt viewer, live event log)
+- RAG event logging to `/logs/debug.jsonl`
+- Graph RAG info in debug panel
 
 ## Performance Metrics
 
@@ -48,6 +59,7 @@ Progress: [███░░░░░░░] 33%
 | 02 - Graph Seeding & Document Ingestion | 3 | ✅ Complete (UAT 14/14) |
 | 02.1 - UI Polish | 1 | ✅ Complete |
 | 03 - Multi-Turn Chat | 4 | ✅ Verified (6/6 CHAT) |
+| 04 - Terraform Download | 2 | ✅ Complete |
 
 **Recent Trend:** Phase 02 delivered: upload pipeline, WebSocket progress, real Neo4j docs list, deletion, drag-and-drop, multi-file, badges, toasts
 | Phase 03 P01 | 15 | 2 tasks | 3 files |
@@ -67,11 +79,9 @@ Decisions are logged in PROJECT.md Key Decisions table.
 
 Pending decisions (must resolve before indicated phase):
 
-- **Before Phase 4**: Embeddings API source — Option A (separate `OPENAI_API_KEY` → OpenAI 1536-dim, no index rebuild) vs Option B (local `sentence-transformers`, 384-dim, requires index rebuild). Recommendation: Option A.
-- **Before Phase 5**: Terraform approval UX — button vs chat message. Recommendation: "Approve & Download" button.
-- **Before Phase 3**: Conversation history size limit — unlimited vs sliding window of last N turns. Recommendation: last 10 turns.
+- **Before Phase 5**: Terraform approval UX — resolved via "Approve & Download" button (shipped in Phase 4).
 - [Phase 03]: Use json_mode with include_raw=True for OpenRouter-compatible structured output + retry
-- [Phase 03-02]: In-memory history Dict[str,List[BaseMessage]] at module level; persistence deferred to v2
+- [Phase 03-02]: In-memory history Dict[str,List[BaseMessage]] at module level; persistence deferred to v2 → **SQLite persistence shipped via direct commit (outside GSD)**
 - [Phase 03-02]: StructuredOutputError returns HTTP 200 with error field (D-20) — frontend shows error bubble
 - [Phase 03]: ChatBoxHandle forwardRef pattern for App.tsx Plan 04 sidebar wiring
 - [Phase 03]: Inline confirmation VStack/HStack for Clear button — matches sidebar width, avoids modal overhead
@@ -94,6 +104,6 @@ None.
 
 ## Session Continuity
 
-Last session: 2026-05-09T23:57:23.840Z
-Stopped at: Completed 03-04-PLAN.md
-Next: /gsd-plan-phase 4
+Last session: 2026-05-10T20:00:00.000Z
+Stopped at: Context refresh — Phase 4 complete, Phase 5 (Docker Polish) is next
+Next: /gsd-plan-phase 5
