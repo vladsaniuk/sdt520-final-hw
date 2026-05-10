@@ -12,7 +12,7 @@ import {
 import { ChatBox } from './components/Chat/ChatBox'
 import type { ChatBoxHandle } from './components/Chat/ChatBox'
 import { KnowledgeBase } from './pages/KnowledgeBase'
-import { MdAdd, MdBolt, MdOutlineArticle, MdCompress, MdClear } from 'react-icons/md'
+import { MdAdd, MdBolt, MdOutlineArticle, MdCompress, MdClear, MdDeleteOutline } from 'react-icons/md'
 import { ActionBar } from './components/ActionBar'
 import type { GenerateType } from './components/ActionBar'
 import { ArtifactDrawer } from './components/ArtifactDrawer'
@@ -285,6 +285,13 @@ function App() {
               }
               // Remove this type from stale
               setStaleButtons(prev => prev.filter(t => t !== type))
+              toast({
+                title: `${type.charAt(0).toUpperCase() + type.slice(1)} generated`,
+                status: 'success',
+                duration: 3000,
+                isClosable: true,
+                position: 'bottom',
+              })
 
             } else if (event.type === 'error') {
               toast({
@@ -333,6 +340,30 @@ function App() {
     setStaleButtons([])
     setArtifacts({})
   }, [])
+
+  const handleDeleteConversation = useCallback(async (convId: string, isEmpty: boolean) => {
+    if (!isEmpty) {
+      const confirmed = window.confirm('Delete this conversation? This cannot be undone.')
+      if (!confirmed) return
+    }
+    try {
+      await fetch(`/api/v1/conversations/${convId}`, { method: 'DELETE' })
+      setSessions(prev => prev.filter(s => s.id !== convId))
+      if (activeConvId === convId) {
+        setSessions(prev => {
+          const remaining = prev.filter(s => s.id !== convId)
+          const nextId = remaining[0]?.id ?? crypto.randomUUID()
+          setActiveConvId(nextId)
+          return remaining
+        })
+      }
+      if (!isEmpty) {
+        toast({ title: 'Conversation deleted', status: 'success', duration: 3000, isClosable: true, position: 'bottom' })
+      }
+    } catch {
+      toast({ title: 'Failed to delete conversation', status: 'error', duration: 4000, isClosable: true, position: 'bottom' })
+    }
+  }, [activeConvId, toast])
 
   return (
     <Flex h="100vh" overflow="hidden" bg="gray.100">
@@ -384,23 +415,49 @@ function App() {
             sessions.map(s => (
               <Box
                 key={s.id}
-                as="button"
-                textAlign="left"
-                px={3} py={2}
+                position="relative"
+                role="group"
                 borderRadius="md"
                 bg={activeConvId === s.id ? 'aws.squidLight' : 'transparent'}
                 _hover={{ bg: activeConvId === s.id ? 'aws.squidLight' : 'whiteAlpha.100' }}
-                onClick={() => { setActiveConvId(s.id); setPage('chat') }}
                 transition="background 0.15s"
               >
-                <Text fontSize="sm" color="gray.200" fontWeight="medium" noOfLines={1}>
-                  {s.title}
-                </Text>
-                <Text fontSize="11px" color="gray.500" noOfLines={1}>
-                  {s.state === 'complete' ? '✅ ' : s.state === 'presenting' ? '📐 ' : '💬 '}
-                  {s.turnCount > 0 ? `${s.turnCount} turn${s.turnCount !== 1 ? 's' : ''} · ` : ''}
-                  {getRelativeTime(s.updatedAt)}
-                </Text>
+                <Box
+                  as="button"
+                  textAlign="left"
+                  px={3} py={2} pr={8}
+                  w="100%"
+                  onClick={() => { setActiveConvId(s.id); setPage('chat') }}
+                >
+                  <Text fontSize="sm" color="gray.200" fontWeight="medium" noOfLines={1}>
+                    {s.title}
+                  </Text>
+                  <Text fontSize="11px" color="gray.500" noOfLines={1}>
+                    {s.state === 'complete' ? '✅ ' : s.state === 'presenting' ? '📐 ' : '💬 '}
+                    {s.turnCount > 0 ? `${s.turnCount} turn${s.turnCount !== 1 ? 's' : ''} · ` : ''}
+                    {getRelativeTime(s.updatedAt)}
+                  </Text>
+                </Box>
+                <Box
+                  as="button"
+                  position="absolute"
+                  right={1} top="50%"
+                  transform="translateY(-50%)"
+                  opacity={0}
+                  _groupHover={{ opacity: 1 }}
+                  transition="opacity 0.15s"
+                  p={1}
+                  borderRadius="sm"
+                  color="gray.500"
+                  _hover={{ color: 'red.400', bg: 'whiteAlpha.100' }}
+                  onClick={(e: React.MouseEvent) => {
+                    e.stopPropagation()
+                    handleDeleteConversation(s.id, s.turnCount === 0)
+                  }}
+                  aria-label="Delete conversation"
+                >
+                  <Icon as={MdDeleteOutline} boxSize={4} />
+                </Box>
               </Box>
             ))
           )}

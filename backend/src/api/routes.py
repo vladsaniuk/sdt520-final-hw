@@ -213,6 +213,13 @@ async def list_conversations():
     return convs
 
 
+@router.delete("/conversations/{conv_id}")
+async def delete_conversation(conv_id: str):
+    """Delete a conversation and all its messages/artifacts."""
+    await asyncio.to_thread(db.delete_conversation, conv_id)
+    return {"deleted": conv_id}
+
+
 @router.get("/conversations/{conv_id}/messages")
 async def get_conversation_messages(conv_id: str):
     """Return messages for a conversation so the frontend can restore chat history."""

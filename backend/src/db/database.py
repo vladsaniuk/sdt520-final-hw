@@ -134,6 +134,16 @@ def clear_conversation(conv_id: str) -> None:
     conn.close()
 
 
+def delete_conversation(conv_id: str) -> None:
+    """Permanently delete a conversation and all its messages/artifacts."""
+    conn = _get_conn()
+    with conn:
+        conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conv_id,))
+        conn.execute("DELETE FROM artifacts WHERE conversation_id = ?", (conv_id,))
+        conn.execute("DELETE FROM conversations WHERE id = ?", (conv_id,))
+    conn.close()
+
+
 def list_conversations() -> List[dict]:
     """Return all conversations with id, state, title (first human message), updated_at."""
     conn = _get_conn()
